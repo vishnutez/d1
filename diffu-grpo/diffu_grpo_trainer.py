@@ -414,6 +414,10 @@ class DiffuGRPOTrainer(GRPOTrainer):
                 end_idx = min(i + generation_batch_size, prompt_ids.size(0))
                 batch_prompt_ids = prompt_ids[i:end_idx]
                 batch_prompt_mask = prompt_mask[i:end_idx]
+                # WARNING: Attention masks are not currently used during generation.
+                # This works fine as we set num_generations == per_device_train_batch_size (no padding tokens created) in our config, but may cause
+                # unintended attention to padding tokens when num_generations is smaller.
+                # As currently we find Llada's modeling file does not handle attention mask. We will address this in future update soon.
                 batch_prompt_completion_ids = self.generate(
                     model=unwrapped_model,
                     prompt=batch_prompt_ids,
