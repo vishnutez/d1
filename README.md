@@ -48,7 +48,7 @@ SFT results can be reproduced with the command,
 # First go to the SFT directory
 cd SFT
 
-CUDA_VISIBLE_DEVICES=0,1 accelerate launch --config_file ddp_config.yaml --main_process_port 29500 --num_processes 2 --grad_accum_steps 4 --batch_size 1 --num_epochs 20 sft_train.py
+CUDA_VISIBLE_DEVICES=0,1 accelerate launch --config_file ddp_config.yaml --main_process_port 29500 --num_processes 2 sft_train.py --grad_accum_steps 4 --batch_size 1 --num_epochs 20 
 # this results in effective batch size of 8 = 1 * 2 * 4, where 2 is the number of gpus.
 ```
 
