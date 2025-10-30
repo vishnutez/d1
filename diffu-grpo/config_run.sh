@@ -13,7 +13,7 @@ ml CUDA/12.9.0  # Load CUDA module
 source activate /scratch/user/vishnukunde/.conda/envs/d1
 
 export HF_HOME=/scratch/user/vishnukunde/.cache/huggingface
-export WANDB_API_KEY=44aea80efa96b75369b009744f019926c33043f1
+export WANDB_API_KEY=<your-api-key>
 
 DATASET="math"
 RUN_NAME=${DATASET}_base_bs12
