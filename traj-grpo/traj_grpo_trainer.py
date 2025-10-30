@@ -30,7 +30,7 @@ if is_peft_available():
 RewardFunc = Union[str, PreTrainedModel, Callable[[list, list], list[float]]]
 
 
-class DiffuGRPOTrainer(GRPOTrainer):
+class TrajGRPOTrainer(GRPOTrainer):
     """
     Group Relative Policy Optimization (GRPO) Trainer for Diffusion Language Models.
 

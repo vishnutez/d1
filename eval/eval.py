@@ -192,6 +192,22 @@ if __name__ == "__main__":
     parser.add_argument("--dont_use_box", action="store_true")
     args = parser.parse_args()
 
+
+    print(f"Local rank: {local_rank}", flush=True)
+    print(f"Model path: {args.model_path}", flush=True)
+    print(f"Few shot: {args.few_shot}", flush=True)
+    print(f"Batch size: {args.batch_size}", flush=True)
+    print(f"Dataset: {args.dataset}", flush=True)
+    print(f"Suffix: {args.suffix}", flush=True)
+    print(f"Checkpoint path: {args.checkpoint_path}", flush=True)
+    print(f"Gen length: {args.gen_length}", flush=True)
+    print(f"Block length: {args.block_length}", flush=True)
+    print(f"Diffusion steps: {args.diffusion_steps}", flush=True)
+    print(f"Add reasoning: {args.add_reasoning}", flush=True)
+    print(f"Don't save: {args.dont_save}", flush=True)
+    print(f"Output dir: {args.output_dir}", flush=True)
+    print(f"Don't use box: {args.dont_use_box}", flush=True)
+
     args.diffusion_steps = args.gen_length // 2
     num_evals = {"gsm8k": -1, "math": -1, "countdown": 256, "sudoku": 256}
 

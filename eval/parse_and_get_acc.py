@@ -438,4 +438,4 @@ def aggregate_results(directory="."):
 
 
 if __name__ == "__main__":
-    aggregate_results(directory="eval_baselines")
+    aggregate_results(directory="eval_d1_3000")

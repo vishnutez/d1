@@ -41,7 +41,8 @@ for task in "${TASKS[@]}"; do
       --batch_size $batch_size \
       --gen_length $gen_length \
       --output_dir "eval_results" \
-      --model_path "/data0/shared/LLaDA-8B-Instruct/"
+      --model_path /data0/shared/LLaDA-8B-Instruct/ \
+        # --checkpoint_path "../diffu-grpo/checkpoints/math_base_bs12/checkpoint-4100"
   done
 done
 

@@ -5,8 +5,8 @@ from trl import TrlParser, ModelConfig
 from peft import LoraConfig
 
 # Custom imports
-from diffu_grpo_trainer import DiffuGRPOTrainer
-from diffu_grpo_config import DiffuGRPOConfig
+from traj_grpo_trainer import TrajGRPOTrainer
+from traj_grpo_config import TrajGRPOConfig
 from reward_func import (
     xmlcount_reward_func,
     soft_format_reward_func,
@@ -101,7 +101,7 @@ def main(grpo_config, model_config):
         lora_dropout=model_config.lora_dropout,
     )
     # Initialize and run trainer
-    trainer = DiffuGRPOTrainer(
+    trainer = TrajGRPOTrainer(
         args=grpo_config,
         model=model,
         peft_config=peft_config,
@@ -113,6 +113,6 @@ def main(grpo_config, model_config):
 
 
 if __name__ == "__main__":
-    parser = TrlParser((DiffuGRPOConfig, ModelConfig))
+    parser = TrlParser((TrajGRPOConfig, ModelConfig))
     grpo_config, model_config = parser.parse_args_and_config()
     main(grpo_config=grpo_config, model_config=model_config)

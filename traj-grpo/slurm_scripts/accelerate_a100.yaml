@@ -1,4 +1,4 @@
-main_process_port: 12346
+main_process_port: 13378
 
 compute_environment: LOCAL_MACHINE
 debug: false
@@ -12,9 +12,10 @@ deepspeed_config:
   gradient_clip: 1
 distributed_type: DEEPSPEED
 downcast_bf16: 'auto'
+machine_rank: 0
 main_training_function: main
 mixed_precision: 'bf16'
-num_machines: 4
+num_machines: 1
 num_processes: 8
 rdzv_backend: static
 same_network: true

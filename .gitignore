@@ -1,0 +1,74 @@
+# ---- Python bytecode ----
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ---- Virtual environments ----
+.env
+.venv
+venv/
+ENV/
+
+# ---- Distribution / packaging ----
+.build/
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+pip-wheel-metadata/
+
+# ---- Testing / coverage ----
+.pytest_cache/
+.coverage*
+hypothesis/
+.tox/
+.nox/
+
+# ---- Notebooks ----
+.ipynb_checkpoints/
+
+# ---- IDE / editor ----
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ---- OS files ----
+.DS_Store
+Thumbs.db
+
+# ---- Logs ----
+logs/
+*.log
+
+# ---- Data / outputs (adjust as needed) ----
+outputs/
+checkpoints/
+wandb/
+lightning_logs/
+*.ckpt
+*.pt
+*.pth
+
+# ---- Cache ----
+.cache/
+.mypy_cache/
+.pytype/
+
+# ---- Environment / credentials ----
+*.env
+.env.*
+.envrc
+
+# ---- Misc ----
+*.bak
+*.tmp
+*.temp
+
+
+# ---- Checkpoints ----
+checkpoints/
+
+# ---- Logs ----
+logs_*/
