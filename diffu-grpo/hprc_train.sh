@@ -47,7 +47,7 @@ ml WebProxy
 ml CUDA/12.9.0  # Load CUDA module
 source activate /scratch/user/vishnukunde/.conda/envs/d1
 
-export WANDB_API_KEY=44aea80efa96b75369b009744f019926c33043f1
+export WANDB_API_KEY=<your-api-key>
 export CUDA_HOME=${CUDA_HOME:-/usr/local/cuda}  # Set CUDA_HOME if not already set
 
 mkdir -p logs "$CFGDIR"
