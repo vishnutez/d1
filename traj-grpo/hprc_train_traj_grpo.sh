@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=traj_grpo_gsm8k_bs4
-#SBATCH --time=01:00:00
+#SBATCH --job-name=test_b0_ans_ng8_bs2_nm8
+#SBATCH --time=02:00:00
 #SBATCH --ntasks-per-node=2
 #SBATCH --mem=128G
 #SBATCH --gres=gpu:a100:2
 #SBATCH --nodes=1
-#SBATCH --output=logs_traj_grpo/%x_%j.out
+#SBATCH --output=logs_traj_grpo/test_b0_ans_ng8_bs2_nm8_%x_%j.out
 
 # ----------------------------
 # User-configurable parameters
@@ -23,12 +23,12 @@ DS_OFFLOAD_PARAM="none"
 DS_ZERO3_INIT=false
 
 DATASET="gsm8k"
-RUN_NAME=${DATASET}_base_bs4
+RUN_NAME=${DATASET}_test_b0_ans_ng8_bs4_nm8
 MODEL_PATH=GSAI-ML/LLaDA-8B-Instruct
-NUM_ITER=2
+NUM_ITER=1
+GEN_BATCH_SIZE=4
 NUM_GENERATIONS=2
-GEN_BATCH_SIZE=2
-PER_DEVICE_TRAIN_BATCH_SIZE=4
+PER_DEVICE_TRAIN_BATCH_SIZE=2
 
 
 # Your traj_grpo_train.py args (editable)
@@ -40,7 +40,7 @@ TRAIN_ARGS_EXTRA="--model_path ${MODEL_PATH} \
                   --run_name ${RUN_NAME} \
                   --output_dir checkpoints/${RUN_NAME} \
                   --generation_batch_size ${GEN_BATCH_SIZE} \
-                  --num_generations ${NUM_GENERATIONS}" \
+                  --num_generations ${NUM_GENERATIONS} \
                   --per_device_train_batch_size ${PER_DEVICE_TRAIN_BATCH_SIZE}"
 
 # ----------------------------
@@ -53,6 +53,7 @@ ml CUDA/12.9.0  # Load CUDA module
 source activate /scratch/user/vishnukunde/.conda/envs/d1
 
 export WANDB_API_KEY=<your-api-key>
+export WANDB_PROJECT="huggingface"
 export CUDA_HOME=${CUDA_HOME:-/usr/local/cuda}  # Set CUDA_HOME if not already set
 
 mkdir -p logs "$CFGDIR"
@@ -120,6 +121,7 @@ srun \
   --ntasks-per-node=1 \
   bash -lc '
     export WANDB_API_KEY='"$WANDB_API_KEY"'
+    export WANDB_PROJECT='"$WANDB_PROJECT"'
     export CUDA_HOME='"$CUDA_HOME"'
     ID=${SLURM_PROCID}
     echo ">>> Node $(hostname) starting machine_rank=${ID}"

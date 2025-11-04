@@ -1,5 +1,6 @@
 import numpy as np
 import re
+import sys
 from math500_utils import remove_boxed, last_boxed_only_string, is_equiv, boxed_in_answer
 
 
@@ -20,22 +21,24 @@ def correctness_reward_func(prompts, completions, answer, step=None, run_name=No
     q = prompts[0][-1]["content"]
     extracted_responses = [extract_xml_answer(r) for r in responses]
 
-    RED = "\033[91m"
-    GREEN = "\033[92m"
-    YELLOW = "\033[93m"
-    BLUE = "\033[94m"
-    RESET = "\033[0m"
+    # Only use colors if outputting to a terminal (not redirected to file)
+    use_colors = sys.stdout.isatty()
+    RED = "\033[91m" if use_colors else ""
+    GREEN = "\033[92m" if use_colors else ""
+    YELLOW = "\033[93m" if use_colors else ""
+    BLUE = "\033[94m" if use_colors else ""
+    RESET = "\033[0m" if use_colors else ""
 
-    print(
-        "-" * 20,
-        f"\n{RED}Prompt:{RESET}\n{q}\n",
-        "-" * 20,
-        f"\n{GREEN}Ground Truth:{RESET}\n{answer[0]}\n",
-        "-" * 20,
-        f"\n{BLUE}Response:{RESET}\n{responses[0]}\n",
-        "-" * 20,
-        f"\n{YELLOW}Extracted:{RESET}\n{extracted_responses[0]}\n",
-    )
+    # print(
+    #     "-" * 20,
+    #     f"\n{RED}Prompt:{RESET}\n{q}\n",
+    #     "-" * 20,
+    #     f"\n{GREEN}Ground Truth:{RESET}\n{answer[0]}\n",
+    #     "-" * 20,
+    #     f"\n{BLUE}Response:{RESET}\n{responses[0]}\n",
+    #     "-" * 20,
+    #     f"\n{YELLOW}Extracted:{RESET}\n{extracted_responses[0]}\n",
+    # )
     return [2.0 if r == a else 0.0 for r, a in zip(extracted_responses, answer)]
 
 
@@ -243,11 +246,13 @@ def correctness_reward_func_math(
         except:
             pass
         extracted_responses.append(r)
-    RED = "\033[91m"
-    GREEN = "\033[92m"
-    YELLOW = "\033[93m"
-    BLUE = "\033[94m"
-    RESET = "\033[0m"
+    # Only use colors if outputting to a terminal (not redirected to file)
+    use_colors = sys.stdout.isatty()
+    RED = "\033[91m" if use_colors else ""
+    GREEN = "\033[92m" if use_colors else ""
+    YELLOW = "\033[93m" if use_colors else ""
+    BLUE = "\033[94m" if use_colors else ""
+    RESET = "\033[0m" if use_colors else ""
 
     print(
         "-" * 20,

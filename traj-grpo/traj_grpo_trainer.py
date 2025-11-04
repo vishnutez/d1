@@ -82,57 +82,48 @@ class TrajGRPOTrainer(GRPOTrainer):
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         if return_outputs:
             raise ValueError("The GRPOTrainer does not support returning outputs")
-        # Compute the per-token log probabilities for the model
 
-        prompt_ids, prompt_mask = inputs["prompt_ids"], inputs["prompt_mask"]
-        completion_ids, completion_mask = inputs["completion_ids"], inputs["completion_mask"]
-        mask_seeds = inputs["mask_seeds"]
-
-        # Combine prompt and completion
-        input_ids = torch.cat([prompt_ids, completion_ids], dim=1)
-        logits_to_keep = completion_ids.size(1)  # only compute logits for completion tokens
-
-        # Get the current iteration index and corresponding mask seed
-        this_itr_idx = self._step % self.args.num_iterations
-        this_itr_mask_seed = mask_seeds[this_itr_idx]
-        input_ids = input_ids.unsqueeze(0)
-        per_token_logps = self._get_per_token_logps(model, input_ids, logits_to_keep, [this_itr_mask_seed])
+        completion_mask = inputs["completion_mask"]
+        prompt_trajectory_ids = inputs["prompt_trajectory_ids"]  # (batch_size, traj_len, seq_len)
+        per_token_logps = self._get_per_token_logps(model, prompt_trajectory_ids) # (batch_size, subsampled_steps)
         # Compute the KL divergence between the model and the reference model
         if self.beta != 0.0:
-            ref_per_token_logps = inputs["ref_per_token_logps"][this_itr_idx].squeeze(0)
+            ref_per_token_logps = inputs["ref_per_token_logps"] # (batch_size, subsampled_steps)
             per_token_kl = (
                 torch.exp(ref_per_token_logps - per_token_logps) - (ref_per_token_logps - per_token_logps) - 1
-            )
+            ) # (batch_size, subsampled_steps)
+
+        # TODO: Implement num_iterations > 1
 
         # Compute the loss
-        advantages = inputs["advantages"]
+        advantages = inputs["advantages"]  # [batch_size,]
         old_per_token_logps = (
-            inputs["old_per_token_logps"][this_itr_idx].squeeze(0)
-            if self.num_iterations > 1
-            else per_token_logps.detach()
-        )
-        coef_1 = torch.exp(per_token_logps - old_per_token_logps)
+            inputs["old_per_token_logps"] if self.args.num_iterations > 1 else per_token_logps.detach()
+        ) # [batch_size, subsampled_steps]
+
+        coef_1 = torch.exp(per_token_logps - old_per_token_logps) # [batch_size, subsampled_steps]
         coef_2 = torch.clamp(coef_1, 1 - self.epsilon, 1 + self.epsilon)
-        per_token_loss1 = coef_1 * advantages.unsqueeze(1)
-        per_token_loss2 = coef_2 * advantages.unsqueeze(1)
-        per_token_loss = -torch.min(per_token_loss1, per_token_loss2)
+        per_token_loss1 = coef_1 * advantages.unsqueeze(1) # [batch_size, subsampled_steps]
+        per_token_loss2 = coef_2 * advantages.unsqueeze(1) # [batch_size, subsampled_steps]
+        per_token_loss = -torch.min(per_token_loss1, per_token_loss2) # [batch_size, subsampled_steps]
         if self.beta != 0.0:
             per_token_loss = per_token_loss + self.beta * per_token_kl
-        loss = (per_token_loss * completion_mask).sum() / completion_mask.sum()
+        loss = per_token_loss.mean()
         # Log the metrics
         mode = "eval" if self.control.should_evaluate else "train"
 
         if self.beta != 0.0:
-            mean_kl = (per_token_kl * completion_mask).sum() / completion_mask.sum()
+            mean_kl = per_token_kl.mean()
             self._metrics[mode]["kl"].append(self.accelerator.gather_for_metrics(mean_kl).mean().item())
 
         is_clipped = (per_token_loss1 < per_token_loss2).float()
-        clip_ratio = (is_clipped * completion_mask).sum() / completion_mask.sum()
+        clip_ratio = is_clipped.mean()
         self._metrics[mode]["clip_ratio"].append(
             self.accelerator.gather_for_metrics(clip_ratio).mean().item()
         )
 
         return loss
+
 
     def add_gumbel_noise(self, logits, temperature, dtype):
         """
@@ -147,6 +138,7 @@ class TrajGRPOTrainer(GRPOTrainer):
         gumbel_noise = (-torch.log(noise)) ** temperature
         return logits.exp() / gumbel_noise
 
+    @torch.no_grad()
     def generate(
         self,
         model,
@@ -173,6 +165,9 @@ class TrajGRPOTrainer(GRPOTrainer):
 
             # Adjust steps if needed
             steps_per_block = max(1, steps // num_blocks)
+
+            trajectory = []
+            trajectory.append(x.clone())
 
             for num_block in range(num_blocks):
                 start_idx = prompt.shape[1] + num_block * block_length
@@ -236,7 +231,13 @@ class TrajGRPOTrainer(GRPOTrainer):
                             x[transfer_index] = x0[transfer_index]
                             del x0, confidence, transfer_index
 
-            return x
+                            trajectory.append(x.clone())
+
+            # make the trajectory a tensor
+            trajectory = torch.stack(trajectory, dim=0)
+            # print('In generate func, trajectory shape: ', trajectory.shape, flush=True)
+            return trajectory
+
 
     def forward_process(self, batch, prompt_index, mask_id, seed=None):
         set_seed(seed)
@@ -302,65 +303,153 @@ class TrajGRPOTrainer(GRPOTrainer):
 
         return num_transfer_tokens.to(torch.int64)
 
-    def _get_per_token_logps(self, model, input_ids, logits_to_keep, mask_seeds):
+    
+
+    # def _get_per_token_logps(self, model, input_ids, leap=16):
+    #     """
+    #     Calculate per-token log probabilities.
+    #     """
+
+    #     # input_ids: [batch_size, traj_len, seq_len]
+    #     batch_size, traj_len, seq_len = input_ids.size()
+
+    #     print(f'input_ids (batch_size, traj_len, seq_len) = ({input_ids.shape})', flush=True)
+
+
+    #     diffusion_steps = traj_len - 1
+    #     device = input_ids.device
+    #     dtype = input_ids.dtype
+
+    #     # subsampled input_ids
+    #     subsampled_input_ids = input_ids[:, ::leap, :] # [batch_size, traj_len/leap, seq_len]
+
+    #     targets = subsampled_input_ids[:, 1:, :] # [batch_size, traj_len/leap-1, seq_len] (next state)
+    #     inputs = subsampled_input_ids[:, :-1, :] # [batch_size, traj_len/leap-1, seq_len] (current state)
+
+
+    #     logits = model(inputs).logits # [batch_size, traj_len/leap-1, seq_len, vocab_size]
+
+    #     print(f'subsampled_input_ids (batch_size, traj_len/leap, seq_len) = ({subsampled_input_ids.shape})', flush=True)
+
+
+    #     per_token_logps = torch.zeros(batch_size, diffusion_steps // leap, device=device, dtype=dtype)
+
+
+
+    #     print(f'per_token_logps (batch_size, diffusion_steps/leap) = ({per_token_logps.shape})', flush=True)
+
+    #     for step in range(0, diffusion_steps, leap):
+    #         x_curr = input_ids[:, step, :]  # [batch_size, seq_len]
+    #         x_next = input_ids[:, step + leap, :]  # [batch_size, seq_len]
+
+    #         # find the locations when x_next is different from x_curr
+    #         unmasked_positions = x_next != x_curr  # [batch_size, seq_len]
+
+    #         print(f'unmasked_positions shape = {unmasked_positions.shape}', flush=True)
+
+    #         # get the logits for the next state given the current state
+    #         next_pred_logits = model(x_curr).logits  # [batch_size, seq_len, vocab_size]
+
+    #         print(f'next_pred_logits shape = {next_pred_logits.shape}', flush=True)
+
+    #         # Select logits where unmasked_positions is True
+    #         # unmasked_positions: [batch_size, seq_len] (boolean)
+    #         # next_pred_logits: [batch_size, seq_len, vocab_size]
+    #         # Result: [num_total_unmasked, vocab_size] where num_total_unmasked is total True values
+    #         unmasked_logits = next_pred_logits[unmasked_positions]  # [num_total_unmasked, vocab_size]
+
+    #         # Select target tokens where unmasked_positions is True
+    #         unmasked_targets = x_next[unmasked_positions]  # [num_total_unmasked]
+
+    #         print(f'unmasked_logits shape = {unmasked_logits.shape}', flush=True)
+    #         print(f'unmasked_targets shape = {unmasked_targets.shape}', flush=True)
+
+    #         # Compute per-token cross-entropy losses
+    #         per_token_losses = F.cross_entropy(unmasked_logits, unmasked_targets, reduction="none")  # [num_total_unmasked]
+
+    #         # Aggregate per-token losses back to per-batch losses
+    #         # Create batch indices tensor to track which batch each unmasked token belongs to
+    #         batch_indices = torch.arange(batch_size, device=device).unsqueeze(1).expand(-1, seq_len)  # [batch_size, seq_len]
+    #         batch_indices_unmasked = batch_indices[unmasked_positions]  # [num_total_unmasked]
+
+    #         # Sum losses per batch using scatter_add
+    #         step_idx = step // leap
+    #         per_token_logps[:, step_idx] = torch.zeros(batch_size, device=device, dtype=per_token_losses.dtype).scatter_add_(
+    #             0, batch_indices_unmasked, per_token_losses
+    #         )
+
+    #     print(f'per_token_logps (batch_size, diffusion_steps/leap) = ({per_token_logps.shape})', flush=True)
+
+    #     torch.cuda.empty_cache()
+    #     return per_token_logps  # [batch_size, diffusion_steps/leap]
+
+
+    # Loop implementation of _get_per_token_logps function
+
+    def _get_per_token_logps(self, model, input_ids, leap=32, answer_only=True):
         """
         Calculate per-token log probabilities.
         """
-        num_iterations, batch_size, seq_len = input_ids.size()
+
+        # input_ids: [batch_size, traj_len, seq_len]
+        batch_size, traj_len, seq_len = input_ids.size()
+
+        answer_ids = input_ids[:, -1, :] # [batch_size, seq_len]
+
+        # print(f'input_ids (batch_size, traj_len, seq_len) = ({input_ids.shape})', flush=True)
+
+
+        diffusion_steps = traj_len - 1
         device = input_ids.device
-        per_token_logps = torch.zeros(num_iterations, batch_size, logits_to_keep, device=device)
+        per_token_logps = torch.zeros(batch_size, diffusion_steps // leap, device=device)
 
-        # Verify mask_seeds length: one seed per iteration
-        assert (
-            len(mask_seeds) == num_iterations
-        ), f"Expected mask_seeds length to be {num_iterations}, got {len(mask_seeds)}"
+        # print(f'per_token_logps (batch_size, diffusion_steps/leap) = ({per_token_logps.shape})', flush=True)
 
-        prompt_length = seq_len - logits_to_keep
-        prompt_index = torch.zeros(seq_len, dtype=torch.bool, device=device)
-        prompt_index[:prompt_length] = True  # Mark prompt tokens as True
+        for step in range(0, diffusion_steps, leap):
+            x_curr = input_ids[:, step, :]  # [batch_size, seq_len]
 
-        # applying masks
-        all_perturbed_seqs = []
-        all_expanded_inputs = []
-        for iter_idx, mask_seed in enumerate(mask_seeds):
-            expanded_input = input_ids[iter_idx]  # [batch_size, seq_len]
-            # Convert tensor to Python scalar if needed
-            seed_value = mask_seed.item() if torch.is_tensor(mask_seed) else mask_seed
-            perturbed_seq, _ = self.forward_process(
-                expanded_input, prompt_index, self.args.mask_id, seed=seed_value
+            if answer_only:
+                positions = answer_ids != x_curr  # [batch_size, seq_len]
+            else:
+                x_next = input_ids[:, step + leap, :]  # [batch_size, seq_len]
+                positions = x_next != x_curr  # [batch_size, seq_len]
+
+            # get the logits for the next state given the current state
+            pred_logits_all = model(x_curr).logits  # [batch_size, seq_len, vocab_size]
+            pred_logits = pred_logits_all[positions]  # [num_total_unmasked, vocab_size]
+
+            if answer_only:
+                targets = answer_ids[positions]  # [num_total_unmasked]
+            else:
+                targets = x_next[positions]  # [num_total_unmasked]
+
+            # Compute per-token cross-entropy losses
+            per_token_losses = F.cross_entropy(pred_logits, targets, reduction="none")  # [num_total_unmasked]
+
+            # Aggregate per-token losses back to per-batch losses
+            # Create batch indices tensor to track which batch each unmasked token belongs to
+            batch_indices_all = torch.arange(batch_size, device=device).unsqueeze(1).expand(-1, seq_len)  # [batch_size, seq_len]
+            batch_indices = batch_indices_all[positions]  # [num_total_unmasked]
+
+            # Mean losses per batch using scatter_add for sum and counts
+            step_idx = step // leap
+            # Sum the losses
+            summed_losses = torch.zeros(batch_size, device=device, dtype=per_token_losses.dtype).scatter_add_(
+                0, batch_indices, per_token_losses
             )
-            all_perturbed_seqs.append(perturbed_seq)
-            all_expanded_inputs.append(expanded_input)
+            # Count the tokens per batch
+            counts = torch.zeros(batch_size, device=device, dtype=per_token_losses.dtype).scatter_add_(
+                0, batch_indices, torch.ones_like(per_token_losses)
+            )
+            # Divide sum by count to get mean
+            per_token_logps[:, step_idx] = summed_losses / counts.clamp(min=1.0)  # clamp to avoid division by zero
 
-        # Concatenate all iterations into a single batch
-        perturbed_seq = torch.cat(all_perturbed_seqs, dim=0)  # [num_iterations * batch_size, seq_len]
-        expanded_input = torch.cat(all_expanded_inputs, dim=0)  # [num_iterations * batch_size, seq_len]
+        # print(f'per_token_logps (batch_size, diffusion_steps/leap) = ({per_token_logps.shape})', flush=True)
 
-        # Get model predictions for the combined batch
-        logits = self.get_logits(
-            model, perturbed_seq, prompt_index, self.args.cfg_scale, self.args.mask_id
-        )  # [num_iterations * batch_size, seq_len, vocab_size]
-
-        # Calculate cross-entropy loss for completion tokens only
-        completion_logits = logits[
-            :, -logits_to_keep:, :
-        ]  # [num_iterations * batch_size, logits_to_keep, vocab_size]
-        completion_targets = expanded_input[
-            :, -logits_to_keep:
-        ]  # [num_iterations * batch_size, logits_to_keep]
-        flat_logits = completion_logits.reshape(-1, completion_logits.size(-1))
-        flat_targets = completion_targets.reshape(-1)
-        loss = F.cross_entropy(flat_logits, flat_targets, reduction="none")
-
-        # Convert to log probabilities and reshape
-        completion_log_probs = -loss.view(num_iterations * batch_size, logits_to_keep)
-        per_token_logps = completion_log_probs.view(num_iterations, batch_size, logits_to_keep)
-
-        # Clean up memory
-        del perturbed_seq, logits, all_perturbed_seqs, all_expanded_inputs
         torch.cuda.empty_cache()
-        per_token_logps = per_token_logps.to(torch.float32)
-        return per_token_logps
+        return per_token_logps  # [batch_size, diffusion_steps/leap]
+
+
 
     def _prepare_inputs(
         self, inputs: dict[str, Union[torch.Tensor, Any]]
@@ -377,6 +466,7 @@ class TrajGRPOTrainer(GRPOTrainer):
             # In evaluation, we don't reuse completions across multiple updates, so we don't need to buffer inputs.
             inputs = self._generate_and_score_completions(inputs)
         return inputs
+
 
     def _generate_and_score_completions(
         self, inputs: dict[str, Union[torch.Tensor, Any]]
@@ -410,7 +500,7 @@ class TrajGRPOTrainer(GRPOTrainer):
 
         with unwrap_model_for_generation(self.model_wrapped, self.accelerator) as unwrapped_model:
             generation_batch_size = self.args.generation_batch_size
-            prompt_completion_ids_all = []
+            prompt_trajectory_ids_all = []
             # Process in batches
             for i in range(0, prompt_ids.size(0), generation_batch_size):
                 end_idx = min(i + generation_batch_size, prompt_ids.size(0))
@@ -420,7 +510,9 @@ class TrajGRPOTrainer(GRPOTrainer):
                 # This works fine as we set num_generations == per_device_train_batch_size (no padding tokens created) in our config, but may cause
                 # unintended attention to padding tokens when num_generations is smaller.
                 # As currently we find Llada's modeling file does not handle attention mask. We will address this in future update soon.
-                batch_prompt_completion_ids = self.generate(
+
+                # Modify the generate function to return the whole trajectory instead of just the completion tokens
+                batch_prompt_trajectory_ids = self.generate(
                     model=unwrapped_model,
                     prompt=batch_prompt_ids,
                     steps=steps,
@@ -430,58 +522,65 @@ class TrajGRPOTrainer(GRPOTrainer):
                     cfg_scale=cfg_scale,
                     remasking=self.args.remasking,
                     mask_id=self.args.mask_id,
-                )
-                prompt_completion_ids_all.append(batch_prompt_completion_ids)
+                )  # (traj_len=diffusion_steps+1, batch_size, seq_len)  1 for the prompt, diffusion_steps for the completion
 
-                del batch_prompt_ids, batch_prompt_mask, batch_prompt_completion_ids
+                # swap dimensions of batch_prompt_trajectory_ids to 
+                batch_prompt_trajectory_ids = batch_prompt_trajectory_ids.permute(1, 0, 2) # (batch_size, traj_len, seq_len)
+
+                prompt_trajectory_ids_all.append(batch_prompt_trajectory_ids)
+
+                del batch_prompt_ids, batch_prompt_mask, batch_prompt_trajectory_ids
                 torch.cuda.empty_cache()
 
-            prompt_completion_ids = torch.cat(prompt_completion_ids_all, dim=0)
+            prompt_trajectory_ids = torch.cat(prompt_trajectory_ids_all, dim=0) # (batch_size, traj_len, seq_len)
+
+        # print(f'prompt_trajectory_ids (after trajectory roll-out from old_policy) (batch_size, traj_len, seq_len) = ({prompt_trajectory_ids.shape})', flush=True)
 
         # Compute prompt length and extract completion ids
-        prompt_length = prompt_ids.size(1)
-        prompt_ids = prompt_completion_ids[:, :prompt_length]
-        completion_ids = prompt_completion_ids[:, prompt_length:]
+        prompt_length = prompt_ids.size(-1)
+        print(f'prompt_length = {prompt_length}', flush=True)
+        prompt_ids = prompt_trajectory_ids[:, :, :prompt_length]
+        trajectory_ids = prompt_trajectory_ids[:, :, prompt_length:]
+        completion_ids = trajectory_ids[:, -1, :]  # final state of the trajectory [batch_size, completion_length]
 
         # Mask everything after the first EOS token
         is_eos = completion_ids == self.processing_class.eos_token_id
-        eos_idx = torch.full((is_eos.size(0),), is_eos.size(1), dtype=torch.long, device=device)
+        eos_idx = torch.full((is_eos.size(0),), is_eos.size(-1), dtype=torch.long, device=device)
         eos_idx[is_eos.any(dim=1)] = is_eos.int().argmax(dim=1)[is_eos.any(dim=1)]
-        sequence_indices = torch.arange(is_eos.size(1), device=device).expand(is_eos.size(0), -1)
+        sequence_indices = torch.arange(is_eos.size(-1), device=device).expand(is_eos.size(0), -1) # (batch_size, completion_length)
         completion_mask = (sequence_indices <= eos_idx.unsqueeze(1)).int()
         logits_to_keep = completion_ids.size(
             1
         )  # we only need to compute the logits for the completion tokens
-        if self.args.random_masking:
-            # use random seeds for every iterations in GRPO iterations
-            mask_seeds = torch.randint(0, 2**12, (self.num_iterations,), device=device)
-        else:
-            # use fixed seeds for every iterations in GRPO iterations
-            mask_seeds = [42] * self.num_iterations
+
 
         all_old_per_token_logps = []
         all_ref_per_token_logps = []
         with torch.no_grad():
-            if self.num_iterations > 1:
-                # repeat prompt completion ids self.num_iterations times
-                prompt_completion_ids_expanded = prompt_completion_ids.unsqueeze(0).expand(
-                    self.num_iterations, -1, -1
+
+            # print(f'Evaluating old per-token logps for the trajectory', flush=True)
+
+            # get logps for the prompt trajectory TODO: these can be saved during generation and need not be computed again
+            if self.args.num_iterations > 1:
+                all_old_per_token_logps = self._get_per_token_logps(
+                    self.model, prompt_trajectory_ids
                 )
-                old_per_token_logps = self._get_per_token_logps(
-                    self.model, prompt_completion_ids_expanded, logits_to_keep, mask_seeds
-                )
-                all_old_per_token_logps = old_per_token_logps
             else:
-                old_per_token_logps = None
+                all_old_per_token_logps = None
+            
+            # print(f'all_old_per_token_logps (batch_size, diffusion_steps) = ({all_old_per_token_logps.shape})', flush=True)
+            # print('Done evaluating old per-token logps for the trajectory', flush=True)
 
             if self.beta == 0.0:
-                ref_per_token_logps = None
+                all_ref_per_token_logps = None
             else:
                 with self.accelerator.unwrap_model(self.model).disable_adapter():
-                    ref_per_token_logps = self._get_per_token_logps(
-                        self.model, prompt_completion_ids_expanded, logits_to_keep, mask_seeds
+                    # print(f'Evaluating ref per-token logps for the trajectory', flush=True)
+                    all_ref_per_token_logps = self._get_per_token_logps(
+                        self.model, prompt_trajectory_ids
                     )
-                    all_ref_per_token_logps = ref_per_token_logps
+                    # print(f'all_ref_per_token_logps (batch_size, diffusion_steps) = ({all_ref_per_token_logps.shape})', flush=True)
+                    # print('Done evaluating ref per-token logps for the trajectory', flush=True)
 
         completions_text = self.processing_class.batch_decode(completion_ids, skip_special_tokens=True)
         if is_conversational(inputs[0]):
@@ -543,6 +642,8 @@ class TrajGRPOTrainer(GRPOTrainer):
         mean_grouped_rewards = mean_grouped_rewards.repeat_interleave(self.num_generations, dim=0)
         std_grouped_rewards = std_grouped_rewards.repeat_interleave(self.num_generations, dim=0)
         advantages = rewards - mean_grouped_rewards
+
+        # print(f'advantages (batch_size,) = ({advantages.shape})', flush=True)
         # Count prompts with zero std deviation
         zero_std_count = (std_grouped_rewards < 1e-6).sum().item()  # Using a small threshold
         total_prompts = std_grouped_rewards.size(0)
@@ -602,14 +703,13 @@ class TrajGRPOTrainer(GRPOTrainer):
                     wandb.log({"completions": wandb.Table(dataframe=df)})
 
         return {
-            "prompt_ids": prompt_ids,
-            "prompt_mask": prompt_mask,
+            "prompt_trajectory_ids": prompt_trajectory_ids,
+            "trajectory_ids": trajectory_ids,
             "completion_ids": completion_ids,
             "completion_mask": completion_mask,
             "old_per_token_logps": all_old_per_token_logps,
             "ref_per_token_logps": all_ref_per_token_logps,
             "advantages": advantages,
-            "mask_seeds": mask_seeds,  # Store all mask seeds for consistent mask patterns
         }
 
     def _get_train_sampler(self, dataset):
