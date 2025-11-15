@@ -50,7 +50,7 @@ TRAIN_ARGS_EXTRA="--model_path ${MODEL_PATH} \
                   --per_device_train_batch_size ${PER_DEVICE_TRAIN_BATCH_SIZE}"
 
 
-export WANDB_API_KEY=44aea80efa96b75369b009744f019926c33043f1
+export WANDB_API_KEY=<YOUR_WANDB_API_KEY>
 export WANDB_PROJECT="huggingface"
 export CUDA_HOME=${CUDA_HOME:-/usr/local/cuda}  # Set CUDA_HOME if not already set
 export TRITON_CACHE_DIR=${TRITON_CACHE_DIR:-/tmp/triton_cache_${USER}}  # Set to local (non-NFS) path
