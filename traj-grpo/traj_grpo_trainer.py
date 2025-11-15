@@ -323,10 +323,16 @@ class TrajGRPOTrainer(GRPOTrainer):
         return num_transfer_tokens.to(torch.int64)
 
     # Loop implementation of _get_per_token_logps function
-    def _get_per_token_logps(self, model, trajectory_ids, sub_steps=4, pred_state='next'):
+    def _get_per_token_logps(self, model, trajectory_ids):
         """
         Calculate per-token log probabilities.
         """
+
+        sub_steps = self.args.sub_steps
+        pred_state = self.args.pred_state
+
+        # print(f'sub_steps: {sub_steps} \n', flush=True)
+        # print(f'pred_state: {pred_state} \n', flush=True)
 
         # masked_positions: [batch_size, diffusion_steps, seq_len]
         batch_size, diffusion_steps_with_init, seq_len = trajectory_ids.size()      
@@ -345,7 +351,15 @@ class TrajGRPOTrainer(GRPOTrainer):
         for step in range(sub_steps):
 
             curr_state = sub_trajectory_ids[:, step, :] # [batch_size, seq_len]
-            next_state = sub_trajectory_ids[:, step + 1, :] # [batch_size, seq_len]            
+            next_state = sub_trajectory_ids[:, step + 1, :] # [batch_size, seq_len] 
+
+            # # decode curr_state/next_state to tokens using tokenizer  
+            # curr_state_tokens = self.processing_class.batch_decode(curr_state, skip_special_tokens=False)
+            # next_state_tokens = self.processing_class.batch_decode(next_state, skip_special_tokens=False)
+
+            # print('step: ', step, flush=True)
+            # print('curr_state_tokens: ', curr_state_tokens, flush=True)
+            # print('next_state_tokens: ', next_state_tokens, flush=True)            
 
             if pred_state == 'next':
                 positions = curr_state != next_state # [batch_size, seq_len]
@@ -355,6 +369,9 @@ class TrajGRPOTrainer(GRPOTrainer):
                 targets = final_state[positions] # [positions.sum()]
             else:
                 raise ValueError(f'Invalid pred_state: {pred_state}')
+
+            # print(f'positions: \n {positions} \n', flush=True)
+            # print(f'targets: \n {targets} \n', flush=True)
 
             pred_logits_all = model(curr_state).logits # [batch_size, seq_len, vocab_size]
             pred_logits = pred_logits_all[positions] # [positions.sum(), vocab_size]
@@ -552,6 +569,7 @@ class TrajGRPOTrainer(GRPOTrainer):
             )
 
         print(f'rewards_per_func (batch_size, num_reward_funcs) = ({rewards_per_func.shape})', flush=True)
+
 
         rewards_per_func = gather(rewards_per_func)
         rewards = (rewards_per_func * self.reward_weights.to(device).unsqueeze(0)).nansum(dim=1)

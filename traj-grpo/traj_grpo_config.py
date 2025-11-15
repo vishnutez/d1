@@ -385,3 +385,11 @@ class TrajGRPOConfig(TrainingArguments):
         default=True,
         metadata={"help": "Whether to randomly mask tokens."},
     )
+    sub_steps: int = field(
+        default=4,
+        metadata={"help": "Number of sub-steps for the trajectory during training."},
+    )
+    pred_state: str = field(
+        default="next",
+        metadata={"help": "Prediction state from curr state: 'next' or 'final'."},
+    )
