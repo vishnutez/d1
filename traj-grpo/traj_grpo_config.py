@@ -385,11 +385,19 @@ class TrajGRPOConfig(TrainingArguments):
         default=True,
         metadata={"help": "Whether to randomly mask tokens."},
     )
-    sub_steps: int = field(
+    logps_eval_num_steps: int = field(
         default=4,
-        metadata={"help": "Number of sub-steps for the trajectory during training."},
+        metadata={"help": "Number of diffusion steps for the trajectory during evaluation of logps. Must be between 1 and the total number of diffusion steps."},
     )
     pred_state: str = field(
         default="next",
         metadata={"help": "Prediction state from curr state: 'next' or 'final'."},
+    )
+    logps_eval_mode: str = field(
+        default="merge",
+        metadata={"help": "Mode for evaluating logps. Must be one of 'merge' or 'unbiased'."},
+    )
+    eval_time_steps_mode: str = field(
+        default="uniform",
+        metadata={"help": "Mode for evaluating logps when logps_eval_mode is 'unbiased'. Must be one of 'uniform' or 'random'."},
     )

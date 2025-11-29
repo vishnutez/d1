@@ -5,7 +5,7 @@ from trl import TrlParser, ModelConfig
 from peft import LoraConfig
 
 # Custom imports
-from traj_grpo_trainer import TrajGRPOTrainer
+from unbiased_grpo_trainer import TrajGRPOTrainer
 from traj_grpo_config import TrajGRPOConfig
 from reward_func import (
     xmlcount_reward_func,

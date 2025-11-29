@@ -84,13 +84,26 @@ class TrajGRPOTrainer(GRPOTrainer):
             raise ValueError("The GRPOTrainer does not support returning outputs")
 
         trajectory_ids = inputs["trajectory_ids"]  # (per_device_train_batch_size, diffusion_steps+1, seq_len)
+        eval_time_steps = inputs["eval_time_steps"]
 
-        sub_step = self._step % self.args.logps_eval_num_steps
+        eval_time_step_idx = self._step % self.args.logps_eval_num_steps
 
-        per_token_logps = self._get_per_token_logps(model, trajectory_ids, sub_step=sub_step).squeeze(0) # (per_device_train_batch_size,)
+        if self.args.logps_eval_mode == 'merge':
+            per_token_logps = self._get_per_token_logps_merge(
+                model, trajectory_ids, eval_time_steps=[eval_time_step_idx]
+            ).squeeze(0) # (per_device_train_batch_size,)
+        elif self.args.logps_eval_mode == 'unbiased':
+            if eval_time_steps is None:
+                raise ValueError(f'eval_time_steps cannot be None when logps_eval_mode is unbiased')
+            per_token_logps = self._get_per_token_logps_unbiased(
+                model, trajectory_ids, eval_time_steps=[eval_time_steps[eval_time_step_idx]]
+            ).squeeze(0) # (per_device_train_batch_size,)
+        else:
+            per_token_logps = None
+
         # Compute the KL divergence between the model and the reference model
         if self.beta != 0.0:
-            ref_per_token_logps = inputs["ref_per_token_logps"][sub_step] # (per_device_train_batch_size,)
+            ref_per_token_logps = inputs["ref_per_token_logps"][eval_time_step_idx] # (per_device_train_batch_size,)
             per_token_kl = (
                 torch.exp(ref_per_token_logps - per_token_logps) - (ref_per_token_logps - per_token_logps) - 1
             ) # (per_device_train_batch_size,)
@@ -100,7 +113,7 @@ class TrajGRPOTrainer(GRPOTrainer):
         # Compute the loss
         advantages = inputs["advantages"]  # [per_device_train_batch_size,]
 
-        old_per_token_logps = inputs["old_per_token_logps"][sub_step] if self.args.logps_eval_num_steps > 1 else per_token_logps.detach()
+        old_per_token_logps = inputs["old_per_token_logps"][eval_time_step_idx] if self.args.logps_eval_num_steps > 1 else per_token_logps.detach()
         coef_1 = torch.exp(per_token_logps - old_per_token_logps) # [per_device_train_batch_size,]
         coef_2 = torch.clamp(coef_1, 1 - self.epsilon, 1 + self.epsilon)
         per_token_loss1 = coef_1 * advantages # [per_device_train_batch_size,]
@@ -314,11 +327,73 @@ class TrajGRPOTrainer(GRPOTrainer):
 
         return num_transfer_tokens.to(torch.int64)
 
+    
     # Loop implementation of _get_per_token_logps function
-    def _get_per_token_logps(self, model, trajectory_ids, sub_step=None):
+    def _get_per_token_logps_unbiased(self, model, trajectory_ids, eval_time_steps=None):
         """
         Calculate per-token log probabilities.
         """
+
+        print('Unbiased GRPO: _get_per_token_logps_unbiased', flush=True)
+
+        # masked_positions: [diffusion_steps, batch_size, seq_len]
+        batch_size= trajectory_ids.shape[1]  
+        device = trajectory_ids.device
+        final_state = trajectory_ids[-1, :, :] # [batch_size, seq_len]
+
+        per_token_logps = torch.zeros(len(eval_time_steps), batch_size, device=device)  # [len(sub_steps), batch_size]
+
+        for i in range(len(eval_time_steps)):
+
+            curr_state = trajectory_ids[eval_time_steps[i], :,  :] # [batch_size, seq_len]
+            next_state = trajectory_ids[eval_time_steps[i] + 1, :, :] # [batch_size, seq_len]             
+
+            if self.args.pred_state == 'next':
+                positions = curr_state != next_state # [batch_size, seq_len]
+                targets = next_state[positions] # [positions.sum()]
+            elif self.args.pred_state == 'final':
+                positions = curr_state != final_state # [batch_size, seq_len]
+                targets = final_state[positions] # [positions.sum()]
+            else:
+                raise ValueError(f'Invalid pred_state: {self.args.pred_state}')
+
+            pred_logits_all = model(curr_state).logits # [batch_size, seq_len, vocab_size]
+            pred_logits = pred_logits_all[positions] # [positions.sum(), vocab_size]
+
+            # Compute per-token cross-entropy losses
+            per_token_losses = F.cross_entropy(pred_logits, targets, reduction="none")  # [positions.sum()]
+
+            # Aggregate per-token losses back to per-batch losses
+            batch_indices_all = torch.arange(batch_size, device=device).unsqueeze(1).expand(-1, seq_len)  # [batch_size, seq_len]
+            batch_indices = batch_indices_all[positions]  # [positions.sum()]
+
+            # print(f'batch_indices (positions.sum(),) = ({batch_indices.shape})', flush=True)
+            # print(f'per_token_losses (positions.sum(),) = ({per_token_losses.shape})', flush=True)
+
+            # Sum the losses
+            summed_losses = torch.zeros(batch_size, device=device, dtype=per_token_losses.dtype).scatter_add_(
+                0, batch_indices, per_token_losses
+            )  # [batch_size] summed losses for each batch where the token is unmasked
+            # print(f'summed_losses (batch_size,) = ({summed_losses.shape})', flush=True)
+            # Count the tokens per batch
+            counts = torch.zeros(batch_size, device=device, dtype=per_token_losses.dtype).scatter_add_(
+                0, batch_indices, torch.ones_like(per_token_losses)  # [batch_size] counts for each batch where the token is unmasked
+            )
+            # print(f'counts (batch_size,) = ({counts.shape})', flush=True)
+            # Divide sum by count to get mean
+            per_token_logps[i, :] = -summed_losses / counts.clamp(min=1.0)  # clamp to avoid division by zero
+
+        torch.cuda.empty_cache()
+        return per_token_logps  # [len(sub_steps), batch_size]
+
+
+    # Loop implementation of _get_per_token_logps function
+    def _get_per_token_logps_merge(self, model, trajectory_ids, eval_time_steps=None):
+        """
+        Calculate per-token log probabilities.
+        """
+
+        print('Merge GRPO: _get_per_token_logps_merge', flush=True)
 
         num_sub_steps = self.args.logps_eval_num_steps
         pred_state = self.args.pred_state
@@ -335,17 +410,15 @@ class TrajGRPOTrainer(GRPOTrainer):
         sub_trajectory_ids = trajectory_ids[:diffusion_steps:leap, :, :]
         sub_trajectory_ids = torch.cat([sub_trajectory_ids, final_state.unsqueeze(0)], dim=0) # Add the final state of the trajectory
 
-        if sub_step is None:
-            sub_steps = range(0, num_sub_steps, 1)
-        else:
-            sub_steps = [sub_step]
+        if eval_time_steps is None:
+            eval_time_steps = range(0, num_sub_steps, 1)
 
-        per_token_logps = torch.zeros(len(sub_steps), batch_size, device=device)  # [len(sub_steps), batch_size]
+        per_token_logps = torch.zeros(len(eval_time_steps), batch_size, device=device)  # [len(eval_time_steps), batch_size]
 
-        for i in range(len(sub_steps)):
+        for i in range(len(eval_time_steps)):
 
-            curr_state = sub_trajectory_ids[sub_steps[i], :,  :] # [batch_size, seq_len]
-            next_state = sub_trajectory_ids[sub_steps[i] + 1, :, :] # [batch_size, seq_len]             
+            curr_state = sub_trajectory_ids[eval_time_steps[i], :,  :] # [batch_size, seq_len]
+            next_state = sub_trajectory_ids[eval_time_steps[i] + 1, :, :] # [batch_size, seq_len]             
 
             if pred_state == 'next':
                 positions = curr_state != next_state # [batch_size, seq_len]
@@ -497,13 +570,32 @@ class TrajGRPOTrainer(GRPOTrainer):
             1
         )  # we only need to compute the logits for the completion tokens
 
+        diffusion_steps = trajectory_ids.size(1) - 1
+
+        if self.args.logps_eval_mode == 'unbiased':
+            if self.args.eval_time_steps_mode == 'random':
+                eval_time_steps = torch.randint(0, diffusion_steps-1, (self.args.logps_eval_num_steps-1,)).to(device)
+                # Add the final time step to eval_time_steps
+                eval_time_steps = torch.cat([eval_time_steps, torch.full((1,), diffusion_steps-1, device=device)])
+            elif self.args.eval_time_steps_mode == 'uniform':
+                eval_time_steps = torch.linspace(0, diffusion_steps-1, self.args.logps_eval_num_steps-1).to(device)
+                # Add the final time step to eval_time_steps
+                eval_time_steps = torch.cat([eval_time_steps, torch.full((1,), diffusion_steps-1, device=device)])
+            else:
+                eval_time_steps = None
+        
+
         all_old_per_token_logps = []
         all_ref_per_token_logps = []
         with torch.no_grad():
             if self.args.logps_eval_num_steps > 1:
-                all_old_per_token_logps = self._get_per_token_logps(
-                    self.model, trajectory_ids
-                )
+                if self.args.logps_eval_mode == 'merge':
+                    all_old_per_token_logps = self._get_per_token_logps_merge(
+                        self.model, trajectory_ids
+                    )
+                elif self.args.logps_eval_mode == 'unbiased':
+                    all_old_per_token_logps = self._get_per_token_logps_unbiased(
+                        self.model, trajectory_ids, eval_time_steps=eval_time_steps)
             else:
                 all_old_per_token_logps = None
             
@@ -512,9 +604,15 @@ class TrajGRPOTrainer(GRPOTrainer):
                 all_ref_per_token_logps = None
             else:
                 with self.accelerator.unwrap_model(self.model).disable_adapter():
-                    all_ref_per_token_logps = self._get_per_token_logps(
-                        self.model, trajectory_ids
-                    )
+                    if self.args.logps_eval_mode == 'merge':
+                        all_ref_per_token_logps = self._get_per_token_logps_merge(
+                            self.model, trajectory_ids
+                        )
+                    elif self.args.logps_eval_mode == 'unbiased':
+                        all_ref_per_token_logps = self._get_per_token_logps_unbiased(
+                            self.model, trajectory_ids, eval_time_steps=eval_time_steps)
+                    else:
+                        all_ref_per_token_logps = None
 
         completions_text = self.processing_class.batch_decode(completion_ids, skip_special_tokens=True)
         if is_conversational(inputs[0]):
@@ -647,6 +745,7 @@ class TrajGRPOTrainer(GRPOTrainer):
         return {
             "trajectory_ids": trajectory_ids,
             "completion_ids": completion_ids,
+            "eval_time_steps": eval_time_steps,
             "old_per_token_logps": all_old_per_token_logps,
             "ref_per_token_logps": all_ref_per_token_logps,
             "advantages": advantages,
