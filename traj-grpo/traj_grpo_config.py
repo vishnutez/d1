@@ -397,7 +397,7 @@ class TrajGRPOConfig(TrainingArguments):
         default="merge",
         metadata={"help": "Mode for evaluating logps. Must be one of 'merge' or 'unbiased'."},
     )
-    eval_time_steps_mode: str = field(
+    logps_eval_time_steps_mode: str = field(
         default="uniform",
         metadata={"help": "Mode for evaluating logps when logps_eval_mode is 'unbiased'. Must be one of 'uniform' or 'random'."},
     )

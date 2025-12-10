@@ -34,13 +34,12 @@ logging_steps: 1
 learning_rate: 3e-6
 lr_scheduler_type: constant_with_warmup
 
-num_generations: 8
+num_generations: 16
 num_train_epochs: 10
 
 per_device_eval_batch_size: 1
-per_device_train_batch_size: 2
+per_device_train_batch_size: 6
 gradient_accumulation_steps: 2
-
 
 gradient_checkpointing: false
 gradient_checkpointing_kwargs:
@@ -52,9 +51,9 @@ run_name: gsm_d1_bs4
 output_dir: /checkpoints/gsm_d1_bs4  # <-- Replace with desired output directory
 
 # Parameters for saving checkpoints
-save_steps: 100
+save_steps: 500
 save_strategy: steps
-save_total_limit: 500 
+save_total_limit: 10 
 
 # Diffusion and GRPO-specific
 max_completion_length: 256
@@ -64,6 +63,9 @@ diffusion_steps: 128
 remasking: low_confidence
 random_masking: True
 p_mask_prompt: 0.15
-beta: 0.0
+beta: 0.04
 epsilon: 0.5
-num_iterations: 4
+generation_batch_size: 6
+logps_eval_num_steps: 8
+logps_eval_mode: unbiased
+logps_eval_time_steps_mode: random
