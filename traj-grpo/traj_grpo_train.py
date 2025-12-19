@@ -31,51 +31,67 @@ from data_utils import (
 )
 
 
+# Force offline mode at the OS level before any HF libraries load
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+os.environ["HF_DATASETS_OFFLINE"] = "1"
+
+
 def main(grpo_config, model_config):
 
-    # Initialize wandb if WANDB_ID is set (for resuming)
-    # Only initialize on rank 0 to avoid multiple wandb instances in distributed training
-    # Read global_step from checkpoint if resuming to ensure correct step logging
+    # # Initialize wandb if WANDB_ID is set (for resuming)
+    # # Only initialize on rank 0 to avoid multiple wandb instances in distributed training
+    # # Read global_step from checkpoint if resuming to ensure correct step logging
+
     rank_str = os.environ.get("RANK")
     rank = int(rank_str) if rank_str is not None else 0
-    wandb_id = os.environ.get("WANDB_ID")
-    wandb_resume = os.environ.get("WANDB_RESUME", "allow")
-    
-    # Get global_step from checkpoint if resuming
-    resume_step = None
-    if grpo_config.resume_from_checkpoint and rank == 0:
-        checkpoint_path = Path(grpo_config.resume_from_checkpoint)
-        training_state_file = checkpoint_path / "training_state.json"
-        if training_state_file.exists():
-            try:
-                with open(training_state_file, 'r') as f:
-                    training_state = json.load(f)
-                    resume_step = training_state.get("global_step", None)
-                    print(f"Found checkpoint at step {resume_step} from training_state.json", flush=True)
-            except Exception as e:
-                print(f"Warning: Could not read training_state.json: {e}", flush=True)
-        
-        # Fallback: try to extract step from checkpoint directory name (e.g., checkpoint-4500)
-        if resume_step is None:
-            checkpoint_name = checkpoint_path.name
-            if checkpoint_name.startswith("checkpoint-"):
-                try:
-                    resume_step = int(checkpoint_name.split("-")[1])
-                    print(f"Extracted checkpoint step {resume_step} from directory name", flush=True)
-                except (ValueError, IndexError):
-                    print(f"Warning: Could not extract step from checkpoint name: {checkpoint_name}", flush=True)
-    
-    if rank == 0 and wandb_id and grpo_config.report_to and "wandb" in grpo_config.report_to and wandb.run is None:
-        print(f"Initializing wandb with run_id={wandb_id}, resume={wandb_resume}, checkpoint_step={resume_step}", flush=True)
+
+    wandb_id = False
+
+    maybe_resume_from_checkpoint = True if wandb_id else False
+    print(f"Maybe resume from checkpoint: {maybe_resume_from_checkpoint}", flush=True)
+
+
+    if maybe_resume_from_checkpoint and rank == 0:
         wandb.init(
             project=os.environ.get("WANDB_PROJECT", "huggingface"),
+            resume="must",
             id=wandb_id,
-            resume=wandb_resume,
         )
-        # Set the step from checkpoint if resuming
-        if resume_step is not None and wandb.run is not None:
-            wandb.run.step = resume_step
-            print(f"Set wandb step to {resume_step} from checkpoint", flush=True)
+        print(f"Initialized wandb with run_id={wandb_id}", flush=True)
+    else:
+        print(f"Initializing a new wandb run", flush=True)
+
+    
+    # # Get global_step from checkpoint if resuming
+    # resume_step = None
+    # if grpo_config.resume_from_checkpoint and rank == 0:
+    #     checkpoint_path = Path(grpo_config.resume_from_checkpoint)
+    #     training_state_file = checkpoint_path / "training_state.json"
+    #     if training_state_file.exists():
+    #         try:
+    #             with open(training_state_file, 'r') as f:
+    #                 training_state = json.load(f)
+    #                 resume_step = training_state.get("global_step", None)
+    #                 print(f"Found checkpoint at step {resume_step} from training_state.json", flush=True)
+    #         except Exception as e:
+    #             print(f"Warning: Could not read training_state.json: {e}", flush=True)
+        
+    #     # Fallback: try to extract step from checkpoint directory name (e.g., checkpoint-4500)
+    #     if resume_step is None:
+    #         checkpoint_name = checkpoint_path.name
+    #         if checkpoint_name.startswith("checkpoint-"):
+    #             try:
+    #                 resume_step = int(checkpoint_name.split("-")[1])
+    #                 print(f"Extracted checkpoint step {resume_step} from directory name", flush=True)
+    #             except (ValueError, IndexError):
+    #                 print(f"Warning: Could not extract step from checkpoint name: {checkpoint_name}", flush=True)
+    
+    # if rank == 0 and wandb_id and grpo_config.report_to and "wandb" in grpo_config.report_to and wandb.run is None:
+    #     print(f"Initializing wandb with run_id={wandb_id}, checkpoint_step={resume_step}", flush=True)
+    #     wandb.init(
+    #         project=os.environ.get("WANDB_PROJECT", "huggingface"),
+    #         fork_from=wandb_id+"?_step="+str(resume_step),
+    #     )
 
     # Set seed for reproducibility
     set_random_seed(grpo_config.seed)
@@ -133,9 +149,10 @@ def main(grpo_config, model_config):
         trust_remote_code=True,
         dtype=torch.bfloat16,
         quantization_config=bnb_config,
+        local_files_only=True,
     ).to(device)
 
-    tokenizer = AutoTokenizer.from_pretrained(grpo_config.model_path, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(grpo_config.model_path, trust_remote_code=True, local_files_only=True)
     tokenizer.pad_token = tokenizer.eos_token
     model.config.use_cache = False
 
@@ -156,7 +173,7 @@ def main(grpo_config, model_config):
         train_dataset=train_set,
     )
 
-    trainer.train()
+    trainer.train(resume_from_checkpoint=maybe_resume_from_checkpoint)
 
 
 if __name__ == "__main__":
