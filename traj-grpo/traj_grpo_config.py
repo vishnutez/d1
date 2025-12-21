@@ -399,5 +399,9 @@ class TrajGRPOConfig(TrainingArguments):
     )
     logps_eval_time_steps_mode: str = field(
         default="uniform",
-        metadata={"help": "Mode for evaluating logps when logps_eval_mode is 'unbiased'. Must be one of 'uniform' or 'random' or 'high_entropy'."},
+        metadata={"help": "Mode for evaluating logps when logps_eval_mode is 'unbiased'. Must be one of 'uniform' or 'random' or 'high_entropy' or 'low_confidence'."},
+    )
+    permute_eval_time_steps: bool = field(
+        default=False,
+        metadata={"help": "Whether to permute the eval_time_steps."},
     )
