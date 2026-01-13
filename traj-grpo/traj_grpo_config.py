@@ -405,3 +405,39 @@ class TrajGRPOConfig(TrainingArguments):
         default=False,
         metadata={"help": "Whether to permute the eval_time_steps."},
     )
+    alpha: float = field(
+        default=0.0,
+        metadata={"help": "Reward weight value for the intermediate term in the reward-diff GRPO."},
+    )
+    entropy_reg_mode: str = field(
+        default="diff",
+        metadata={"help": "Mode for entropy regularization. Must be one of 'diff' (difference between consecutive time steps), 'max' (maximum entropy), 'min' (minimum entropy)."},
+    )
+    gamma: float = field(
+        default=0.93,
+        metadata={"help": "Scale factor for the rewards."},
+    )
+    baseline_mode: str = field(
+        default="init",
+        metadata={"help": "Mode for the baseline. Must be one of 'init' (initial value), 'final' (final value), 'curr' (current value)."},
+    )
+    terminate_at_last_non_eos: bool = field(
+        default=False,
+        metadata={"help": "Whether to terminate at the last non-EOS step."},
+    )
+    eos_scale: str = field(
+        default="ones",
+        metadata={"help": "Scale for the EOS step. Must be one of 'ones' (ones), 'zeros' (zeros)."},
+    )
+    max_entropy_regularization: str = field(
+        default="neg_logp",
+        metadata={"help": "Mode for the maximum entropy regularization. Must be one of 'neg_logp' (negative logp), 'entropy' (entropy)."},
+    )
+    use_exact_kl: bool = field(
+        default=False,
+        metadata={"help": "Whether to use exact KL divergence."},
+    )
+    tau: float = field(
+        default=0.0,
+        metadata={"help": "Reward weight value for the intermediate reward diff in r(x0) - r(x0|t)."},
+    )

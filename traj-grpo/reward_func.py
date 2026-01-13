@@ -211,6 +211,7 @@ def sudoku_reward_func(prompts, completions, run_name, step=None, rank=None, **k
         responses = [completion[0]["content"] for completion in completions]
     else:
         responses = completions
+        print(f'in sudoku_reward_func, non-conversational mode, responses: {len(responses)}', flush=True)
 
     scores = []
     for i, response in enumerate(responses):

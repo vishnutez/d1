@@ -8,8 +8,8 @@ downcast_bf16: 'auto'
 
 rdzv_backend: static
 same_network: true
-main_process_ip: g096
-main_process_port: 12346
+main_process_ip: g052
+main_process_port: 12874
 
 num_machines: 4
 num_processes: 8

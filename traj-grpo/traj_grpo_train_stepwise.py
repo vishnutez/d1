@@ -8,7 +8,9 @@ from trl import TrlParser, ModelConfig
 from peft import LoraConfig
 
 # Custom imports
-from ubgrpo_low_confidence_trainer import TrajGRPOTrainer
+# from ubgrpo_stepwise_rewards import TrajGRPOTrainer
+from ubgrpo_stepwise_eos import TrajGRPOTrainer
+# from ubgrpo_reward_diff import TrajGRPOTrainer
 from traj_grpo_config import TrajGRPOConfig
 from reward_func import (
     xmlcount_reward_func,
@@ -44,7 +46,7 @@ def main(grpo_config, model_config):
     rank_str = os.environ.get("RANK")
     rank = int(rank_str) if rank_str is not None else 0
 
-    wandb_id = False
+    wandb_id = os.environ.get("WANDB_ID", False)
 
     maybe_resume_from_checkpoint = True if wandb_id else False
     print(f"Maybe resume from checkpoint: {maybe_resume_from_checkpoint}", flush=True)

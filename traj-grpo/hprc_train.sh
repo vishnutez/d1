@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=<YOUR_JOB_NAME>
-#SBATCH --time=50:00:00
+#SBATCH --time=36:00:00
 #SBATCH --ntasks-per-node=2
-#SBATCH --mem=128G
+#SBATCH --mem=128G # 128GB
 #SBATCH --gres=gpu:a100:2
 #SBATCH --nodes=4
 #SBATCH --output=logs/%x_%j.out
@@ -10,7 +10,7 @@
 # ----------------------------
 # User-configurable parameters
 # ----------------------------
-MASTER_PORT=12346
+MASTER_PORT=$((12000 + RANDOM % 1000))
 CFGDIR="./accel_cfg"
 PRECISION="bf16"                  # bf16 | fp16 | no
 
@@ -30,13 +30,25 @@ NUM_GENERATIONS=8
 PER_DEVICE_TRAIN_BATCH_SIZE=6
 GRAD_ACCUMULATION_STEPS=2
 LOGPS_EVAL_NUM_STEPS=8
-LEARNING_RATE=1e-5
+LEARNING_RATE=3e-5
 LOGPS_EVAL_MODE="unbiased"
-LOGPS_EVAL_TIME_STEPS_MODE="uniform"
+LOGPS_EVAL_TIME_STEPS_MODE="high_entropy"
 EPSILON=0.5
 TEMPERATURE=0.9
+GAMMA=0.95
+BASELINE_MODE="curr"
+# TERMINATE_AT_LAST_NON_EOS=False
 
-RUN_NAME="${LOGPS_EVAL_MODE}_grpo_${LOGPS_EVAL_TIME_STEPS_MODE}_${DATASET}_eps_${EPSILON}_temp_${TEMPERATURE}_ng${NUM_GENERATIONS}_bs${PER_DEVICE_TRAIN_BATCH_SIZE}_ga${GRAD_ACCUMULATION_STEPS}_le${LOGPS_EVAL_NUM_STEPS}_lr${LEARNING_RATE}"
+# if [ "$TERMINATE_AT_LAST_NON_EOS" = True ]; then
+#     TERMINATE_AT_LAST_NON_EOS_FLAG="_eos"
+# else
+#     TERMINATE_AT_LAST_NON_EOS_FLAG=""
+# fi
+
+# RUN_NAME="${BASELINE_MODE}_value_normalized_stepwise_${LOGPS_EVAL_MODE}_grpo_${LOGPS_EVAL_TIME_STEPS_MODE}_${DATASET}_eps_${EPSILON}_temp_${TEMPERATURE}_ng${NUM_GENERATIONS}_bs${PER_DEVICE_TRAIN_BATCH_SIZE}_ga${GRAD_ACCUMULATION_STEPS}_le${LOGPS_EVAL_NUM_STEPS}_lr${LEARNING_RATE}_gamma${GAMMA}${TERMINATE_AT_LAST_NON_EOS_FLAG}"
+RUN_NAME="${BASELINE_MODE}_value_normalized_stepwise_${LOGPS_EVAL_MODE}_grpo_${LOGPS_EVAL_TIME_STEPS_MODE}_${DATASET}_eps_${EPSILON}_temp_${TEMPERATURE}_ng${NUM_GENERATIONS}_bs${PER_DEVICE_TRAIN_BATCH_SIZE}_ga${GRAD_ACCUMULATION_STEPS}_le${LOGPS_EVAL_NUM_STEPS}_lr${LEARNING_RATE}_gamma${GAMMA}"
+
+
 
 # traj_grpo_train.py args (editable)
 TRAIN_SCRIPT="traj_grpo_train.py"
@@ -54,7 +66,10 @@ TRAIN_ARGS_EXTRA="--model_path ${MODEL_PATH} \
                   --logps_eval_time_steps_mode ${LOGPS_EVAL_TIME_STEPS_MODE} \
                   --learning_rate ${LEARNING_RATE} \
                   --epsilon ${EPSILON} \
-                  --temperature ${TEMPERATURE}"
+                  --temperature ${TEMPERATURE} \
+                  --gamma ${GAMMA} \
+                  --baseline_mode ${BASELINE_MODE}"
+                  # --terminate_at_last_non_eos ${TERMINATE_AT_LAST_NON_EOS}"
                   
 
 # ----------------------------
@@ -64,12 +79,12 @@ TRAIN_ARGS_EXTRA="--model_path ${MODEL_PATH} \
 ml Miniconda3
 ml WebProxy
 ml CUDA/12.9.0  # Load CUDA module
-source activate <YOUR_CONDA_ENV>
+source activate /scratch/user/vishnukunde/.conda/envs/d1
 
 export WANDB_API_KEY=<YOUR_WANDB_API_KEY>
 export WANDB_PROJECT=<YOUR_WANDB_PROJECT>
 export CUDA_HOME=${CUDA_HOME:-/usr/local/cuda}  # Set CUDA_HOME if not already set
-export HF_HOME=<YOUR_HF_HOME_DIR>
+export HF_HOME=<YOUR_HF_HOME_DIR>  # remove this line if you are using the default HF_HOME
 
 mkdir -p logs "$CFGDIR"
 
@@ -139,6 +154,8 @@ srun \
     export WANDB_PROJECT='"$WANDB_PROJECT"'
     export CUDA_HOME='"$CUDA_HOME"'
     export HF_HOME='"$HF_HOME"'
+    export HF_DATASETS_OFFLINE='"$HF_DATASETS_OFFLINE"'
+    export TRANSFORMERS_OFFLINE='"$TRANSFORMERS_OFFLINE"'
     ID=${SLURM_PROCID}
     echo ">>> Node $(hostname) starting machine_rank=${ID}"
     accelerate launch \
