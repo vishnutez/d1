@@ -25,7 +25,6 @@ DS_ZERO3_INIT=false
 DATASET="sudoku"
 
 MODEL_PATH=GSAI-ML/LLaDA-8B-Instruct
-
 NUM_GENERATIONS=8
 PER_DEVICE_TRAIN_BATCH_SIZE=6
 GRAD_ACCUMULATION_STEPS=2
@@ -35,23 +34,34 @@ LOGPS_EVAL_MODE="unbiased"
 LOGPS_EVAL_TIME_STEPS_MODE="high_entropy"
 EPSILON=0.5
 TEMPERATURE=0.9
-GAMMA=0.95
 BASELINE_MODE="curr"
-# TERMINATE_AT_LAST_NON_EOS=False
+TERMINATE_AT_LAST_NON_EOS=False
+EOS_SCALE="ones"
+BETA=1e-3
+TAU=0.0
+ALPHA=0.0
+MAX_ENTROPY_REGULARIZATION="entropy"
+USE_EXACT_KL=True
+GAMMA=0.95
 
-# if [ "$TERMINATE_AT_LAST_NON_EOS" = True ]; then
-#     TERMINATE_AT_LAST_NON_EOS_FLAG="_eos"
-# else
-#     TERMINATE_AT_LAST_NON_EOS_FLAG=""
-# fi
+if [ "$TERMINATE_AT_LAST_NON_EOS" = True ]; then
+    TERMINATE_AT_LAST_NON_EOS_FLAG="_eos_scale_${EOS_SCALE}"
+else
+    TERMINATE_AT_LAST_NON_EOS_FLAG=""
+fi
 
-# RUN_NAME="${BASELINE_MODE}_value_normalized_stepwise_${LOGPS_EVAL_MODE}_grpo_${LOGPS_EVAL_TIME_STEPS_MODE}_${DATASET}_eps_${EPSILON}_temp_${TEMPERATURE}_ng${NUM_GENERATIONS}_bs${PER_DEVICE_TRAIN_BATCH_SIZE}_ga${GRAD_ACCUMULATION_STEPS}_le${LOGPS_EVAL_NUM_STEPS}_lr${LEARNING_RATE}_gamma${GAMMA}${TERMINATE_AT_LAST_NON_EOS_FLAG}"
-RUN_NAME="${BASELINE_MODE}_value_normalized_stepwise_${LOGPS_EVAL_MODE}_grpo_${LOGPS_EVAL_TIME_STEPS_MODE}_${DATASET}_eps_${EPSILON}_temp_${TEMPERATURE}_ng${NUM_GENERATIONS}_bs${PER_DEVICE_TRAIN_BATCH_SIZE}_ga${GRAD_ACCUMULATION_STEPS}_le${LOGPS_EVAL_NUM_STEPS}_lr${LEARNING_RATE}_gamma${GAMMA}"
+if [ "$USE_EXACT_KL" = True ]; then
+    KL_TYPE="exact_kl"
+else
+    KL_TYPE="kl"
+fi
 
 
+RUN_NAME="reward_diff_${LOGPS_EVAL_MODE}_grpo_${LOGPS_EVAL_TIME_STEPS_MODE}_${DATASET}_eps_${EPSILON}_temp_${TEMPERATURE}_ng${NUM_GENERATIONS}_bs${PER_DEVICE_TRAIN_BATCH_SIZE}_ga${GRAD_ACCUMULATION_STEPS}_le${LOGPS_EVAL_NUM_STEPS}_lr${LEARNING_RATE}_tau${TAU}${TERMINATE_AT_LAST_NON_EOS_FLAG}_${KL_TYPE}${BETA}"
 
 # traj_grpo_train.py args (editable)
-TRAIN_SCRIPT="traj_grpo_train.py"
+# TRAIN_SCRIPT="traj_grpo_train_reward_diff.py"
+TRAIN_SCRIPT="traj_grpo_train_exact_kl.py"
 TRAIN_ARGS_BASE="--config slurm_scripts/train.yaml"
 TRAIN_ARGS_EXTRA="--model_path ${MODEL_PATH} \
                   --dataset ${DATASET} \
@@ -66,12 +76,17 @@ TRAIN_ARGS_EXTRA="--model_path ${MODEL_PATH} \
                   --logps_eval_time_steps_mode ${LOGPS_EVAL_TIME_STEPS_MODE} \
                   --learning_rate ${LEARNING_RATE} \
                   --epsilon ${EPSILON} \
+                  --alpha ${ALPHA} \
                   --temperature ${TEMPERATURE} \
-                  --gamma ${GAMMA} \
-                  --baseline_mode ${BASELINE_MODE}"
-                  # --terminate_at_last_non_eos ${TERMINATE_AT_LAST_NON_EOS}"
+                  --baseline_mode ${BASELINE_MODE} \
+                  --terminate_at_last_non_eos ${TERMINATE_AT_LAST_NON_EOS} \
+                  --eos_scale ${EOS_SCALE} \
+                  --beta ${BETA} \
+                  --max_entropy_regularization ${MAX_ENTROPY_REGULARIZATION} \
+                  --use_exact_kl ${USE_EXACT_KL} \
+                  --tau=${TAU} \
+                  --gamma=${GAMMA}"
                   
-
 # ----------------------------
 # Environment setup
 # ----------------------------
