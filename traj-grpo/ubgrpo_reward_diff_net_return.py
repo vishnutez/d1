@@ -919,21 +919,13 @@ class TrajGRPOTrainer(GRPOTrainer):
 
         print(f'final_rewards (per_device_train_batch_size,) = ({final_rewards.shape})', flush=True)
 
-        incremental_advantages = (final_rewards.unsqueeze(1) - rewards_per_step[:, :-1])
-        incremental_advantages_selected = torch.zeros(incremental_advantages.shape[0], self.args.logps_eval_num_steps, device=device)
-        for batch_idx in range(incremental_advantages.shape[0]):
-            incremental_advantages_selected[batch_idx, :] = incremental_advantages[batch_idx, eval_time_steps[batch_idx]]
-        print(f'incremental_advantages_selected (per_device_train_batch_size, logps_eval_num_steps) = ({incremental_advantages_selected.shape})', flush=True)
-
-        if self.args.returns_mode == 'net_return':
-            returns_local = final_rewards.unsqueeze(1) + self.args.tau * incremental_advantages_selected
-            print('using group advantages, returns_local = group_returns_local and incremental advantages added later', flush=True)
-            returns_local_selected = torch.zeros(returns_local.shape[0], self.args.logps_eval_num_steps, device=device)
-        elif self.args.returns_mode == 'sequence_return':
-            returns_local_selected = final_rewards.unsqueeze(1) # (per_device_train_batch_size, 1)
-            print('using sequence returns, returns_local = final_rewards', flush=True)
-        else:
-            raise ValueError(f'Invalid returns mode: {self.args.returns_mode}. Available modes: net_return, sequence_return')
+        returns_local = final_rewards.unsqueeze(1) + self.args.tau * (final_rewards.unsqueeze(1) - rewards_per_step[:, :-1]) # (per_device_train_batch_size, diffusion_steps)
+        print(f'returns_local (per_device_train_batch_size, diffusion_steps) = ({returns_local.shape})', flush=True)
+        returns_local_selected = torch.zeros(returns_local.shape[0], self.args.logps_eval_num_steps, device=device)
+        # selected time steps
+        for batch_idx in range(returns_local.shape[0]):
+            returns_local_selected[batch_idx, :] = returns_local[batch_idx, eval_time_steps[batch_idx]]
+        print(f'returns_local_selected (per_device_train_batch_size, logps_eval_num_steps) = ({returns_local_selected.shape})', flush=True)
 
 
         ############################## Start of discounted stepwise rewards ##############################
@@ -1054,23 +1046,12 @@ class TrajGRPOTrainer(GRPOTrainer):
         advantages_per_step = returns_grouped - mean_grouped_returns      # [num_prompts, num_generations, K]
         advantages_per_step = advantages_per_step.view(batch_size, K)    # [batch_size, K]
 
-        print(f'advantages_per_step (batch_size, logps_eval_num_steps) = ({advantages_per_step.shape})', flush=True)
-
         # Slice to local process
         process_slice = slice(
             self.accelerator.process_index * len(prompts),
             (self.accelerator.process_index + 1) * len(prompts),
         )
         advantages_per_step = advantages_per_step[process_slice]
-
-
-        if self.args.returns_mode == 'sequence_return':
-            advantages_per_step = advantages_per_step  + self.args.tau * incremental_advantages_selected
-            print('using group returns, so we add the incremental advantages to the group returns: net_advantage_per_step = group_advantage + tau * incremental_advantages', flush=True)
-        elif self.args.returns_mode == 'net_return':
-            print('using net returns, so we do not add the incremental advantages to the group returns: net_advantage_per_step = group_advantage', flush=True)
-        else:
-            raise ValueError(f'Invalid returns mode: {self.args.returns_mode}. Available modes: group_return, net_return')
 
 
         # Log the metrics
