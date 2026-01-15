@@ -38,11 +38,12 @@ BASELINE_MODE="curr"
 TERMINATE_AT_LAST_NON_EOS=False
 EOS_SCALE="ones"
 BETA=1e-3
-TAU=0.0
+TAU=0.25
 ALPHA=0.0
 MAX_ENTROPY_REGULARIZATION="entropy"
 USE_EXACT_KL=True
-GAMMA=0.95
+GAMMA=0.0
+RETURNS_MODE="sequence_return"
 
 if [ "$TERMINATE_AT_LAST_NON_EOS" = True ]; then
     TERMINATE_AT_LAST_NON_EOS_FLAG="_eos_scale_${EOS_SCALE}"
@@ -57,11 +58,11 @@ else
 fi
 
 
-RUN_NAME="reward_diff_${LOGPS_EVAL_MODE}_grpo_${LOGPS_EVAL_TIME_STEPS_MODE}_${DATASET}_eps_${EPSILON}_temp_${TEMPERATURE}_ng${NUM_GENERATIONS}_bs${PER_DEVICE_TRAIN_BATCH_SIZE}_ga${GRAD_ACCUMULATION_STEPS}_le${LOGPS_EVAL_NUM_STEPS}_lr${LEARNING_RATE}_tau${TAU}${TERMINATE_AT_LAST_NON_EOS_FLAG}_${KL_TYPE}${BETA}"
+RUN_NAME="reward_diff_${LOGPS_EVAL_MODE}_grpo_${LOGPS_EVAL_TIME_STEPS_MODE}_${DATASET}_eps_${EPSILON}_temp_${TEMPERATURE}_ng${NUM_GENERATIONS}_bs${PER_DEVICE_TRAIN_BATCH_SIZE}_ga${GRAD_ACCUMULATION_STEPS}_le${LOGPS_EVAL_NUM_STEPS}_lr${LEARNING_RATE}_tau${TAU}_${RETURNS_MODE}${TERMINATE_AT_LAST_NON_EOS_FLAG}_${KL_TYPE}${BETA}"
 
 # traj_grpo_train.py args (editable)
-# TRAIN_SCRIPT="traj_grpo_train_reward_diff.py"
-TRAIN_SCRIPT="traj_grpo_train_exact_kl.py"
+TRAIN_SCRIPT="traj_grpo_train_reward_diff.py"
+# TRAIN_SCRIPT="traj_grpo_train_exact_kl.py"
 TRAIN_ARGS_BASE="--config slurm_scripts/train.yaml"
 TRAIN_ARGS_EXTRA="--model_path ${MODEL_PATH} \
                   --dataset ${DATASET} \
@@ -85,7 +86,8 @@ TRAIN_ARGS_EXTRA="--model_path ${MODEL_PATH} \
                   --max_entropy_regularization ${MAX_ENTROPY_REGULARIZATION} \
                   --use_exact_kl ${USE_EXACT_KL} \
                   --tau=${TAU} \
-                  --gamma=${GAMMA}"
+                  --gamma=${GAMMA} \
+		  --returns_mode=${RETURNS_MODE}"
                   
 # ----------------------------
 # Environment setup
