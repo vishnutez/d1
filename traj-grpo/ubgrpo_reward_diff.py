@@ -107,18 +107,12 @@ class TrajGRPOTrainer(GRPOTrainer):
 
         # Compute the KL divergence between the model and the reference model
         if self.beta != 0.0:
-            
-            if self.args.use_exact_kl:
-                print(f'exact_kl is enabled, so exact kl term is computed', flush=True)
-                ref_all_tokens_logps = inputs["ref_all_tokens_logps"][eval_time_step_idx] # (bs, num_tokens_per_diffusion_step, vocab_size)
-                exact_kl = (torch.exp(all_tokens_logps) * (all_tokens_logps - ref_all_tokens_logps)).sum(dim=(-1, -2)) # (bs,)
-            else:
-                print(f'exact_kl is not enabled, so k3 estimate for kl term is computed using ref and current logps', flush=True)
-                ref_per_token_logps = inputs["ref_per_token_logps"][eval_time_step_idx] # (bs,)
-                per_token_kl = (
-                    torch.exp(ref_per_token_logps - per_token_logps) - (ref_per_token_logps - per_token_logps) - 1
-                ) # (bs,)
-            
+            ref_all_tokens_logps = inputs["ref_all_tokens_logps"][eval_time_step_idx] # (bs, num_tokens_per_diffusion_step, vocab_size)
+            exact_kl = (torch.exp(all_tokens_logps) * (all_tokens_logps - ref_all_tokens_logps)).sum(dim=(-1, -2)) # (bs,)
+            k3_estimate_kl = (
+                torch.exp(ref_per_token_logps - per_token_logps) - (ref_per_token_logps - per_token_logps) - 1
+            ) # (bs,)
+        
         else:
             print(f'beta = 0.0, so no kl term is computed', flush=True)
 
@@ -135,7 +129,7 @@ class TrajGRPOTrainer(GRPOTrainer):
             if self.args.use_exact_kl:
                 per_token_loss = per_token_loss + self.beta * exact_kl
             else:
-                per_token_loss = per_token_loss + self.beta * per_token_kl
+                per_token_loss = per_token_loss + self.beta * k3_estimate_kl
         if self.args.alpha > 0.0:  # neg_logp/entropy term
             print(f'alpha = {self.args.alpha}, so entropy regularization term is computed', flush=True)
             if self.args.max_entropy_regularization == 'neg_logp':
@@ -156,12 +150,14 @@ class TrajGRPOTrainer(GRPOTrainer):
         if self.beta != 0.0:
             if self.args.use_exact_kl:
                 mean_kl = exact_kl.mean()
-                self._metrics[mode]["exact_kl"].append(self.accelerator.gather_for_metrics(mean_kl).mean().item())
+                self._metrics[mode]["exact_kl"].append(self.accelerator.gather_for_metrics(exact_kl.mean()).mean().item())
             else:
-                mean_kl = per_token_kl.mean()
+                mean_kl = k3_estimate_kl.mean()
+                self._metrics[mode]["k3_estimate_kl"].append(self.accelerator.gather_for_metrics(k3_estimate_kl.mean()).mean().item())
             self._metrics[mode]["kl"].append(self.accelerator.gather_for_metrics(mean_kl).mean().item())
         else:
             print(f'beta = 0.0, so no kl term is logged', flush=True)
+        
         is_clipped = (per_token_loss1 < per_token_loss2).float()
         clip_ratio = is_clipped.mean()
         self._metrics[mode]["clip_ratio"].append(
@@ -910,7 +906,13 @@ class TrajGRPOTrainer(GRPOTrainer):
         # reshape rewards_per_func into (per_device_train_batch_size, diffusion_steps+1, num_reward_funcs)
         rewards_per_func = rewards_per_func.reshape(-1, self.args.diffusion_steps+1, len(self.reward_funcs))
 
-        # rewards_per_func = gather(rewards_per_func)
+
+        final_rewards_per_func = rewards_per_func[:, -1]  # (batch_size, num_reward_funcs)
+        final_rewards_per_func_all_devices = gather(final_rewards_per_func)
+
+        print(f'final_rewards_per_func_all_devices (batch_size, num_reward_funcs) = ({final_rewards_per_func_all_devices})', flush=True)
+
+
         rewards_per_step = (rewards_per_func * self.reward_weights.to(device).unsqueeze(0).unsqueeze(0)).nansum(dim=2)
         
         print(f'rewards_per_step (per_device_train_batch_size, diffusion_steps+1) = ({rewards_per_step.shape})', flush=True)
@@ -1089,7 +1091,7 @@ class TrajGRPOTrainer(GRPOTrainer):
             else:
                 reward_func_name = reward_func.__name__
             # Only calculate mean for samples where this reward function was applied (non-NaN values)
-            mean_rewards = torch.nanmean(rewards_per_func[:, -1, i]).item()
+            mean_rewards = torch.nanmean(final_rewards_per_func_all_devices[:, i]).item()
             self._metrics[mode][f"rewards/{reward_func_name}"].append(mean_rewards)
         self._metrics[mode]["reward"].append(final_rewards.mean().item())
         # self._metrics[mode]["reward_std"].append(std_grouped_rewards.mean().item())

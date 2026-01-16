@@ -38,12 +38,18 @@ num_generations: 16
 num_train_epochs: 10
 
 per_device_eval_batch_size: 1
+# num_generations_eval: 1
+# eval_strategy: steps
+# eval_steps: 200
+
+
 per_device_train_batch_size: 6
 gradient_accumulation_steps: 2
 
+
 gradient_checkpointing: false
 gradient_checkpointing_kwargs:
-  use_reentrant: false
+use_reentrant: false
 
 resume_from_checkpoint: false
 

@@ -75,6 +75,7 @@ def main(grpo_config, model_config):
             int_reward_func,
             correctness_reward_func,
         ]
+        test_set = get_gsm8k_questions("test")
     elif grpo_config.dataset == "countdown":
         dataset = get_countdown_questions("train")
         reward_functions = [countdown_reward_func]
@@ -87,6 +88,7 @@ def main(grpo_config, model_config):
             correctness_reward_func_math,
             boxed_and_answer_tags_format_reward,
         ]
+        test_set = get_math_questions("test")
 
     # Shuffle dataset with fixed seed for reproducibility
     dataset = dataset.shuffle(seed=grpo_config.seed)
@@ -94,6 +96,7 @@ def main(grpo_config, model_config):
     # Split dataset if needed
     if grpo_config.dataset in ["countdown", "sudoku"]:
         train_set = dataset.select(range(0, len(dataset) - 500))  # Leave last 500 for evaluation
+        test_set = dataset.select(range(len(dataset) - 500, len(dataset)))  # Last 500 for evaluation
     else:
         train_set = dataset
 

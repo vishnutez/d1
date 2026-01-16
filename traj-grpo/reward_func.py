@@ -215,7 +215,8 @@ def sudoku_reward_func(prompts, completions, run_name, step=None, rank=None, **k
 
     scores = []
     for i, response in enumerate(responses):
-        do_print = np.random.rand() < 0.4
+        # do_print = np.random.rand() < 0.4
+        do_print = (i+1) % (kwargs.get("diffusion_steps", 128) + 1) == 0
         puzzle = kwargs["puzzle"][i]
         ground_truth = kwargs["solution"][i]
         solution = extract_answer_sudoku(response)
@@ -224,11 +225,12 @@ def sudoku_reward_func(prompts, completions, run_name, step=None, rank=None, **k
         scores.append(score)
 
         if do_print:
-            print(f"--------------------------------")
+            print(f"--------------------------------printing only every final answer (128+1)th completion----------------------")
             print(f"Puzzle: {puzzle} (length: {len(puzzle)})")
             print(f"Extracted solution: {solution}  (length: {len(solution) if solution else 0})")
             print(f"Ground_truth: {ground_truth}")
             print(f"Score: {score:.4f}")
+            print(f"Response: {response}")
 
     return scores
 

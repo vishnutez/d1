@@ -441,3 +441,7 @@ class TrajGRPOConfig(TrainingArguments):
         default=0.0,
         metadata={"help": "Reward weight value for the intermediate reward diff in r(x0) - r(x0|t)."},
     )
+    returns_mode: str = field(
+        default="net_return",
+        metadata={"help": "Mode for the returns. Must be one of 'net_return' (net return; F), 'sequence_return' (sequence return; V)."},
+    )
