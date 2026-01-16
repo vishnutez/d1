@@ -108,6 +108,7 @@ class TrajGRPOTrainer(GRPOTrainer):
         # Compute the KL divergence between the model and the reference model
         if self.beta != 0.0:
             ref_all_tokens_logps = inputs["ref_all_tokens_logps"][eval_time_step_idx] # (bs, num_tokens_per_diffusion_step, vocab_size)
+            ref_per_token_logps = inputs["ref_per_token_logps"][eval_time_step_idx] # (bs,)
             exact_kl = (torch.exp(all_tokens_logps) * (all_tokens_logps - ref_all_tokens_logps)).sum(dim=(-1, -2)) # (bs,)
             k3_estimate_kl = (
                 torch.exp(ref_per_token_logps - per_token_logps) - (ref_per_token_logps - per_token_logps) - 1
@@ -150,10 +151,10 @@ class TrajGRPOTrainer(GRPOTrainer):
         if self.beta != 0.0:
             if self.args.use_exact_kl:
                 mean_kl = exact_kl.mean()
-                self._metrics[mode]["exact_kl"].append(self.accelerator.gather_for_metrics(exact_kl.mean()).mean().item())
             else:
                 mean_kl = k3_estimate_kl.mean()
-                self._metrics[mode]["k3_estimate_kl"].append(self.accelerator.gather_for_metrics(k3_estimate_kl.mean()).mean().item())
+            self._metrics[mode]["exact_kl"].append(self.accelerator.gather_for_metrics(exact_kl.mean()).mean().item())
+            self._metrics[mode]["k3_estimate_kl"].append(self.accelerator.gather_for_metrics(k3_estimate_kl.mean()).mean().item())
             self._metrics[mode]["kl"].append(self.accelerator.gather_for_metrics(mean_kl).mean().item())
         else:
             print(f'beta = 0.0, so no kl term is logged', flush=True)
