@@ -919,8 +919,9 @@ class TrajGRPOTrainer(GRPOTrainer):
         print(f'rewards_per_step (per_device_train_batch_size, diffusion_steps+1) = ({rewards_per_step.shape})', flush=True)
         
         final_rewards = rewards_per_step[:, -1]  # (per_device_train_batch_size,)
+        final_rewards_all_devices = gather(final_rewards)
 
-        print(f'final_rewards (per_device_train_batch_size,) = ({final_rewards.shape})', flush=True)
+        print(f'final_rewards_all_devices (batch_size,) = ({final_rewards_all_devices})', flush=True)
 
         incremental_advantages = (final_rewards.unsqueeze(1) - rewards_per_step[:, :-1])
         incremental_advantages_selected = torch.zeros(incremental_advantages.shape[0], self.args.logps_eval_num_steps, device=device)
@@ -1094,7 +1095,7 @@ class TrajGRPOTrainer(GRPOTrainer):
             # Only calculate mean for samples where this reward function was applied (non-NaN values)
             mean_rewards = torch.nanmean(final_rewards_per_func_all_devices[:, i]).item()
             self._metrics[mode][f"rewards/{reward_func_name}"].append(mean_rewards)
-        self._metrics[mode]["reward"].append(final_rewards.mean().item())
+        self._metrics[mode]["reward"].append(final_rewards_all_devices.mean().item())
         # self._metrics[mode]["reward_std"].append(std_grouped_rewards.mean().item())
 
         if self.log_completions and self.state.global_step % self.args.logging_steps == 0:
