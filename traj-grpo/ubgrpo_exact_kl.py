@@ -107,18 +107,13 @@ class TrajGRPOTrainer(GRPOTrainer):
 
         # Compute the KL divergence between the model and the reference model
         if self.beta != 0.0:
-            
-            if self.args.use_exact_kl:
-                print(f'exact_kl is enabled, so exact kl term is computed', flush=True)
-                ref_all_tokens_logps = inputs["ref_all_tokens_logps"][eval_time_step_idx] # (bs, num_tokens_per_diffusion_step, vocab_size)
-                exact_kl = (torch.exp(all_tokens_logps) * (all_tokens_logps - ref_all_tokens_logps)).sum(dim=(-1, -2)) # (bs,)
-            else:
-                print(f'exact_kl is not enabled, so k3 estimate for kl term is computed using ref and current logps', flush=True)
-                ref_per_token_logps = inputs["ref_per_token_logps"][eval_time_step_idx] # (bs,)
-                per_token_kl = (
-                    torch.exp(ref_per_token_logps - per_token_logps) - (ref_per_token_logps - per_token_logps) - 1
-                ) # (bs,)
-            
+            ref_all_tokens_logps = inputs["ref_all_tokens_logps"][eval_time_step_idx] # (bs, num_tokens_per_diffusion_step, vocab_size)
+            ref_per_token_logps = inputs["ref_per_token_logps"][eval_time_step_idx] # (bs,)
+            exact_kl = (torch.exp(all_tokens_logps) * (all_tokens_logps - ref_all_tokens_logps)).sum(dim=-2).mean(dim=-1) # (bs,)
+            k3_estimate_kl = (
+                torch.exp(ref_per_token_logps - per_token_logps) - (ref_per_token_logps - per_token_logps) - 1
+            ) # (bs,)
+        
         else:
             print(f'beta = 0.0, so no kl term is computed', flush=True)
 
@@ -135,7 +130,7 @@ class TrajGRPOTrainer(GRPOTrainer):
             if self.args.use_exact_kl:
                 per_token_loss = per_token_loss + self.beta * exact_kl
             else:
-                per_token_loss = per_token_loss + self.beta * per_token_kl
+                per_token_loss = per_token_loss + self.beta * k3_estimate_kl
         if self.args.alpha > 0.0:  # neg_logp/entropy term
             print(f'alpha = {self.args.alpha}, so entropy regularization term is computed', flush=True)
             if self.args.max_entropy_regularization == 'neg_logp':
@@ -156,12 +151,14 @@ class TrajGRPOTrainer(GRPOTrainer):
         if self.beta != 0.0:
             if self.args.use_exact_kl:
                 mean_kl = exact_kl.mean()
-                self._metrics[mode]["exact_kl"].append(self.accelerator.gather_for_metrics(mean_kl).mean().item())
             else:
-                mean_kl = per_token_kl.mean()
+                mean_kl = k3_estimate_kl.mean()
+            self._metrics[mode]["exact_kl"].append(self.accelerator.gather_for_metrics(exact_kl.mean()).mean().item())
+            self._metrics[mode]["k3_estimate_kl"].append(self.accelerator.gather_for_metrics(k3_estimate_kl.mean()).mean().item())
             self._metrics[mode]["kl"].append(self.accelerator.gather_for_metrics(mean_kl).mean().item())
         else:
             print(f'beta = 0.0, so no kl term is logged', flush=True)
+        
         is_clipped = (per_token_loss1 < per_token_loss2).float()
         clip_ratio = is_clipped.mean()
         self._metrics[mode]["clip_ratio"].append(
@@ -261,6 +258,7 @@ class TrajGRPOTrainer(GRPOTrainer):
 
                             if return_metadata:
                                 x0_greedy = torch.argmax(logits, dim=-1)
+                                x0_greedy[~mask_index] = x[~mask_index] # replace the decoded tokens with the previously decoded tokens
                                 greedy_completions.append(x0_greedy.clone())
                             
                             del logits_with_noise
@@ -340,7 +338,7 @@ class TrajGRPOTrainer(GRPOTrainer):
             if return_metadata:
                 logps = torch.stack(logps, dim=0) # (diffusion_steps, batch_size, num_tokens,)
                 unmasked_prob_distributions = torch.stack(unmasked_prob_distributions, dim=0) # (diffusion_steps, batch_size, num_tokens, vocab_size)
-                greedy_completions = torch.stack(greedy_completions[1:], dim=0) # (diffusion_steps, batch_size, seq_len), remove the initial greedy completion
+                greedy_completions = torch.stack(greedy_completions, dim=0) # (diffusion_steps+1, batch_size, seq_len)
                 return trajectory, logps, unmasked_prob_distributions, greedy_completions, last_non_eos_steps
             else:
                 return trajectory
@@ -699,7 +697,7 @@ class TrajGRPOTrainer(GRPOTrainer):
 
             logps = torch.cat(logps_all, dim=0) # (per_device_train_batch_size, diffusion_steps+1, num_tokens)
             unmasked_prob_distributions = torch.cat(unmasked_prob_distributions_all, dim=0)  # (per_device_train_batch_size, diffusion_steps+1, num_tokens, vocab_size)
-            greedy_completions = torch.cat(greedy_completions_all, dim=0) # (per_device_train_batch_size, diffusion_steps, seq_len)
+            greedy_completions = torch.cat(greedy_completions_all, dim=0) # (per_device_train_batch_size, diffusion_steps+1, seq_len)
             last_non_eos_steps = torch.cat(last_non_eos_steps_all, dim=0) # (per_device_train_batch_size,)
         
         # Compute prompt length and extract completion ids
@@ -729,14 +727,14 @@ class TrajGRPOTrainer(GRPOTrainer):
 
         print(f'completion_ids (per_device_train_batch_size, diffusion_steps, seq_len) = ({completion_ids.shape})', flush=True)
 
-        # reshape into (per_device_train_batch_size*diffusion_steps, seq_len)
-        completion_ids = completion_ids.reshape(-1, completion_ids.size(-1)) # (per_device_train_batch_size * diffusion_steps, seq_len)
+        # reshape into (per_device_train_batch_size*(diffusion_steps+1), seq_len)
+        completion_ids = completion_ids.reshape(-1, completion_ids.size(-1)) # (per_device_train_batch_size * (diffusion_steps+1), seq_len)
 
         
         
         print('prompts: ', len(prompts), flush=True)
         
-        prompts_full = [prompt for prompt in prompts for _ in range(self.args.diffusion_steps)] # List with each element of prompts repeated diffusion_steps times
+        prompts_full = [prompt for prompt in prompts for _ in range(self.args.diffusion_steps+1)] # List with each element of prompts repeated diffusion_steps+1 times
 
         diffusion_steps = trajectory_ids.size(0) - 1
 
@@ -761,16 +759,16 @@ class TrajGRPOTrainer(GRPOTrainer):
             )
 
             for batch_idx in range(batch_size):
-                prob_distributions = unmasked_prob_distributions[batch_idx]  # (diffusion_steps+1, num_tokens, vocab_size)
+                prob_distributions = unmasked_prob_distributions[batch_idx]  # (diffusion_steps, num_tokens, vocab_size)
 
                 # Compute entropy in the vocab_size dimension
                 entropy = -torch.sum(
                     prob_distributions * torch.log(prob_distributions + EPS),
                     dim=-1
-                )  # (diffusion_steps+1, num_tokens)
+                )  # (diffusion_steps, num_tokens)
 
                 # Average entropy over the num_tokens dimension
-                entropy = entropy.mean(dim=-1)  # (diffusion_steps+1,)
+                entropy = entropy.mean(dim=-1)  # (diffusion_steps,)
 
                 # Select top-k time steps with highest entropy
                 top_k_indices = torch.topk(
@@ -877,7 +875,7 @@ class TrajGRPOTrainer(GRPOTrainer):
 
                 # Repeat all input columns (but "prompt" and "completion") to match the number of generations
                 keys = [key for key in inputs[0] if key not in ["prompt", "completion"]]
-                reward_kwargs = {key: [example[key] for example in inputs for _ in range(self.args.diffusion_steps)] for key in keys}
+                reward_kwargs = {key: [example[key] for example in inputs for _ in range(self.args.diffusion_steps+1)] for key in keys}
                 output_reward_func = reward_func(
                     prompts=prompts_full,
                     completions=completions,
@@ -905,13 +903,59 @@ class TrajGRPOTrainer(GRPOTrainer):
 
         print(f'rewards_per_func (batch_size, num_reward_funcs) = ({rewards_per_func.shape})', flush=True)
 
-        # reshape rewards_per_func into (per_device_train_batch_size, diffusion_steps, num_reward_funcs)
-        rewards_per_func = rewards_per_func.reshape(-1, self.args.diffusion_steps, len(self.reward_funcs))
 
-        # rewards_per_func = gather(rewards_per_func)
+
+        # reshape rewards_per_func into (per_device_train_batch_size, diffusion_steps+1, num_reward_funcs)
+        rewards_per_func = rewards_per_func.reshape(-1, self.args.diffusion_steps+1, len(self.reward_funcs))
+
+        # take only from 1:diffusion_steps+1, because the first step is the initial state only in discounted stepwise rewards
+        rewards_per_func = rewards_per_func[:, 1:]  # (per_device_train_batch_size, diffusion_steps+1, num_reward_funcs)
+
+
+        final_rewards_per_func = rewards_per_func[:, -1]  # (batch_size, num_reward_funcs)
+        final_rewards_per_func_all_devices = gather(final_rewards_per_func)
+
+        print(f'final_rewards_per_func_all_devices (batch_size, num_reward_funcs) = ({final_rewards_per_func_all_devices})', flush=True)
+
+
         rewards_per_step = (rewards_per_func * self.reward_weights.to(device).unsqueeze(0).unsqueeze(0)).nansum(dim=2)
         
         print(f'rewards_per_step (per_device_train_batch_size, diffusion_steps) = ({rewards_per_step.shape})', flush=True)
+        
+        final_rewards = rewards_per_step[:, -1]  # (per_device_train_batch_size,)
+        final_rewards_all_devices = gather(final_rewards)
+
+        print(f'final_rewards_all_devices (batch_size,) = ({final_rewards_all_devices})', flush=True)
+
+        # incremental_advantages = (final_rewards.unsqueeze(1) - rewards_per_step[:, :-1])
+        # incremental_advantages_selected = torch.zeros(incremental_advantages.shape[0], self.args.logps_eval_num_steps, device=device)
+        # for batch_idx in range(incremental_advantages.shape[0]):
+        #     incremental_advantages_selected[batch_idx, :] = incremental_advantages[batch_idx, eval_time_steps[batch_idx]]
+        # print(f'incremental_advantages_selected (per_device_train_batch_size, logps_eval_num_steps) = ({incremental_advantages_selected.shape})', flush=True)
+
+        # if self.args.returns_mode == 'net_return':
+        #     returns_local = final_rewards.unsqueeze(1) + self.args.tau * incremental_advantages_selected
+        #     print('using group advantages, returns_local = group_returns_local and incremental advantages added later', flush=True)
+        #     returns_local_selected = torch.zeros(returns_local.shape[0], self.args.logps_eval_num_steps, device=device)
+        # elif self.args.returns_mode == 'sequence_return':
+        #     returns_local_selected = final_rewards.unsqueeze(1) # (per_device_train_batch_size, 1)
+        #     print('using sequence returns, returns_local = final_rewards', flush=True)
+        # else:
+        #     raise ValueError(f'Invalid returns mode: {self.args.returns_mode}. Available modes: net_return, sequence_return')        
+
+        # # reshape rewards_per_func into (per_device_train_batch_size, diffusion_steps, num_reward_funcs)
+        # rewards_per_func = rewards_per_func.reshape(-1, self.args.diffusion_steps+1, len(self.reward_funcs))
+
+        # # take only from 1:diffusion_steps+1, because the first step is the initial state
+        # rewards_per_func = rewards_per_func[:, 1:]  # (per_device_train_batch_size, diffusion_steps, num_reward_funcs)
+
+        # # rewards_per_func = gather(rewards_per_func)
+        # rewards_per_step = (rewards_per_func * self.reward_weights.to(device).unsqueeze(0).unsqueeze(0)).nansum(dim=2)
+        
+        # print(f'rewards_per_step (per_device_train_batch_size, diffusion_steps) = ({rewards_per_step.shape})', flush=True)
+
+
+        ############################## Start of discounted stepwise rewards ##############################
         
 
         # schedule using gamma
@@ -946,15 +990,15 @@ class TrajGRPOTrainer(GRPOTrainer):
   
         print(f'returns_local (per_device_train_batch_size, diffusion_steps) = ({returns_local.shape})', flush=True)
 
-        final_rewards = rewards_per_step[:, -1]
-        print(f'final_rewards (per_device_train_batch_size,) = ({final_rewards.shape})', flush=True)
-
-
         returns_local_selected = torch.zeros(returns_local.shape[0], self.args.logps_eval_num_steps, device=device)
         # selected time steps
         for batch_idx in range(returns_local.shape[0]):
             returns_local_selected[batch_idx, :] = returns_local[batch_idx, eval_time_steps[batch_idx]]
         print(f'returns_local_selected (per_device_train_batch_size, logps_eval_num_steps) = ({returns_local_selected.shape})', flush=True)
+
+
+
+        ############################## End of discounted stepwise rewards ##############################
 
         # # ===== Step 1: entropy-based intermediate reward =====
         # with torch.no_grad():
@@ -1017,6 +1061,8 @@ class TrajGRPOTrainer(GRPOTrainer):
         advantages_per_step = returns_grouped - mean_grouped_returns      # [num_prompts, num_generations, K]
         advantages_per_step = advantages_per_step.view(batch_size, K)    # [batch_size, K]
 
+        print(f'advantages_per_step (batch_size, logps_eval_num_steps) = ({advantages_per_step.shape})', flush=True)
+
         # Slice to local process
         process_slice = slice(
             self.accelerator.process_index * len(prompts),
@@ -1024,6 +1070,13 @@ class TrajGRPOTrainer(GRPOTrainer):
         )
         advantages_per_step = advantages_per_step[process_slice]
 
+        # if self.args.returns_mode == 'sequence_return':
+        #     advantages_per_step = advantages_per_step  + self.args.tau * incremental_advantages_selected
+        #     print('using group returns, so we add the incremental advantages to the group returns: net_advantage_per_step = group_advantage + tau * incremental_advantages', flush=True)
+        # elif self.args.returns_mode == 'net_return':
+        #     print('using net returns, so we do not add the incremental advantages to the group returns: net_advantage_per_step = group_advantage', flush=True)
+        # else:
+        #     raise ValueError(f'Invalid returns mode: {self.args.returns_mode}. Available modes: group_return, net_return')
 
         # Log the metrics
         mode = "eval" if self.control.should_evaluate else "train"
@@ -1041,9 +1094,9 @@ class TrajGRPOTrainer(GRPOTrainer):
             else:
                 reward_func_name = reward_func.__name__
             # Only calculate mean for samples where this reward function was applied (non-NaN values)
-            mean_rewards = torch.nanmean(rewards_per_func[:, -1, i]).item()
+            mean_rewards = torch.nanmean(final_rewards_per_func_all_devices[:, i]).item()
             self._metrics[mode][f"rewards/{reward_func_name}"].append(mean_rewards)
-        self._metrics[mode]["reward"].append(final_rewards.mean().item())
+        self._metrics[mode]["reward"].append(final_rewards_all_devices.mean().item())
         # self._metrics[mode]["reward_std"].append(std_grouped_rewards.mean().item())
 
         if self.log_completions and self.state.global_step % self.args.logging_steps == 0:

@@ -109,7 +109,7 @@ class TrajGRPOTrainer(GRPOTrainer):
         if self.beta != 0.0:
             ref_all_tokens_logps = inputs["ref_all_tokens_logps"][eval_time_step_idx] # (bs, num_tokens_per_diffusion_step, vocab_size)
             ref_per_token_logps = inputs["ref_per_token_logps"][eval_time_step_idx] # (bs,)
-            exact_kl = (torch.exp(all_tokens_logps) * (all_tokens_logps - ref_all_tokens_logps)).sum(dim=(-1, -2)) # (bs,)
+            exact_kl = (torch.exp(all_tokens_logps) * (all_tokens_logps - ref_all_tokens_logps)).sum(dim=-2).mean(dim=-1) # (bs,)
             k3_estimate_kl = (
                 torch.exp(ref_per_token_logps - per_token_logps) - (ref_per_token_logps - per_token_logps) - 1
             ) # (bs,)
@@ -258,6 +258,7 @@ class TrajGRPOTrainer(GRPOTrainer):
 
                             if return_metadata:
                                 x0_greedy = torch.argmax(logits, dim=-1)
+                                x0_greedy[~mask_index] = x[~mask_index] # replace the decoded tokens with the previously decoded tokens
                                 greedy_completions.append(x0_greedy.clone())
                             
                             del logits_with_noise
