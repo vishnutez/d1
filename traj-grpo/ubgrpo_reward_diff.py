@@ -931,9 +931,8 @@ class TrajGRPOTrainer(GRPOTrainer):
         print(f'incremental_advantages_selected (per_device_train_batch_size, logps_eval_num_steps) = ({incremental_advantages_selected.shape})', flush=True)
 
         if self.args.returns_mode == 'net_return':
-            returns_local = final_rewards.unsqueeze(1) + self.args.tau * incremental_advantages_selected
             print('using group advantages, returns_local = group_returns_local and incremental advantages added later', flush=True)
-            returns_local_selected = torch.zeros(returns_local.shape[0], self.args.logps_eval_num_steps, device=device)
+            returns_local_selected = final_rewards.unsqueeze(1) + self.args.tau * incremental_advantages_selected # (per_device_train_batch_size, logps_eval_num_steps)
         elif self.args.returns_mode == 'sequence_return':
             returns_local_selected = final_rewards.unsqueeze(1) # (per_device_train_batch_size, 1)
             print('using sequence returns, returns_local = final_rewards', flush=True)
