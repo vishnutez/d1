@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=<YOUR_JOB_NAME>
-#SBATCH --time=36:00:00
+#SBATCH --time=96:00:00
 #SBATCH --ntasks-per-node=2
 #SBATCH --mem=128G # 128GB
 #SBATCH --gres=gpu:a100:2
@@ -25,6 +25,7 @@ DS_ZERO3_INIT=false
 DATASET="sudoku"
 
 MODEL_PATH=GSAI-ML/LLaDA-8B-Instruct
+
 NUM_GENERATIONS=8
 PER_DEVICE_TRAIN_BATCH_SIZE=6
 GRAD_ACCUMULATION_STEPS=2
@@ -37,13 +38,12 @@ TEMPERATURE=0.9
 BASELINE_MODE="curr"
 TERMINATE_AT_LAST_NON_EOS=False
 EOS_SCALE="ones"
-BETA=1e-3
-TAU=0.25
+BETA=0.04
+TAU=1.0
 ALPHA=0.0
+RETURNS_MODE="net_return"
 MAX_ENTROPY_REGULARIZATION="entropy"
-USE_EXACT_KL=True
-GAMMA=0.0
-RETURNS_MODE="sequence_return"
+USE_EXACT_KL=False
 
 if [ "$TERMINATE_AT_LAST_NON_EOS" = True ]; then
     TERMINATE_AT_LAST_NON_EOS_FLAG="_eos_scale_${EOS_SCALE}"
@@ -59,10 +59,11 @@ fi
 
 
 RUN_NAME="reward_diff_${LOGPS_EVAL_MODE}_grpo_${LOGPS_EVAL_TIME_STEPS_MODE}_${DATASET}_eps_${EPSILON}_temp_${TEMPERATURE}_ng${NUM_GENERATIONS}_bs${PER_DEVICE_TRAIN_BATCH_SIZE}_ga${GRAD_ACCUMULATION_STEPS}_le${LOGPS_EVAL_NUM_STEPS}_lr${LEARNING_RATE}_tau${TAU}_${RETURNS_MODE}${TERMINATE_AT_LAST_NON_EOS_FLAG}_${KL_TYPE}${BETA}"
+# RUN_NAME="reward_diff_${LOGPS_EVAL_MODE}_grpo_${LOGPS_EVAL_TIME_STEPS_MODE}_${DATASET}_eps_${EPSILON}_temp_${TEMPERATURE}_ng${NUM_GENERATIONS}_bs${PER_DEVICE_TRAIN_BATCH_SIZE}_ga${GRAD_ACCUMULATION_STEPS}_le${LOGPS_EVAL_NUM_STEPS}_lr${LEARNING_RATE}_alpha${TAU}"
+
 
 # traj_grpo_train.py args (editable)
 TRAIN_SCRIPT="traj_grpo_train_reward_diff.py"
-# TRAIN_SCRIPT="traj_grpo_train_exact_kl.py"
 TRAIN_ARGS_BASE="--config slurm_scripts/train.yaml"
 TRAIN_ARGS_EXTRA="--model_path ${MODEL_PATH} \
                   --dataset ${DATASET} \
@@ -86,9 +87,10 @@ TRAIN_ARGS_EXTRA="--model_path ${MODEL_PATH} \
                   --max_entropy_regularization ${MAX_ENTROPY_REGULARIZATION} \
                   --use_exact_kl ${USE_EXACT_KL} \
                   --tau=${TAU} \
-                  --gamma=${GAMMA} \
-		  --returns_mode=${RETURNS_MODE}"
+                  --gamma=0.0 \
+                  --returns_mode ${RETURNS_MODE}"
                   
+
 # ----------------------------
 # Environment setup
 # ----------------------------
@@ -96,12 +98,14 @@ TRAIN_ARGS_EXTRA="--model_path ${MODEL_PATH} \
 ml Miniconda3
 ml WebProxy
 ml CUDA/12.9.0  # Load CUDA module
-source activate /scratch/user/vishnukunde/.conda/envs/d1
+source activate <YOUR_CONDA_ENV_NAME\>
 
 export WANDB_API_KEY=<YOUR_WANDB_API_KEY>
 export WANDB_PROJECT=<YOUR_WANDB_PROJECT>
 export CUDA_HOME=${CUDA_HOME:-/usr/local/cuda}  # Set CUDA_HOME if not already set
 export HF_HOME=<YOUR_HF_HOME_DIR>  # remove this line if you are using the default HF_HOME
+
+
 
 mkdir -p logs "$CFGDIR"
 
