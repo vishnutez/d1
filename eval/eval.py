@@ -190,6 +190,7 @@ if __name__ == "__main__":
     parser.add_argument("--dont_save", action="store_true")
     parser.add_argument("--output_dir", type=str, default="results/")
     parser.add_argument("--dont_use_box", action="store_true")
+    parser.add_argument("--temperature", type=float, default=0.0)
     args = parser.parse_args()
 
 
@@ -207,7 +208,7 @@ if __name__ == "__main__":
     print(f"Don't save: {args.dont_save}", flush=True)
     print(f"Output dir: {args.output_dir}", flush=True)
     print(f"Don't use box: {args.dont_use_box}", flush=True)
-
+    print(f"Temperature: {args.temperature}", flush=True)
     args.diffusion_steps = args.gen_length // 2
     num_evals = {"gsm8k": -1, "math": -1, "countdown": 256, "sudoku": 256}
 
@@ -265,6 +266,7 @@ if __name__ == "__main__":
         gen_length=args.gen_length,
         block_length=args.block_length,
         steps=args.diffusion_steps,
+        temperature=args.temperature,
     )
 
     if not args.dont_save:
