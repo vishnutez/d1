@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=rl_eval_math
-#SBATCH --time=96:00:00
+#SBATCH --job-name=eval_gsm8k
+#SBATCH --time=2:00:00
 #SBATCH --ntasks-per-node=1
 #SBATCH --mem=80G
 #SBATCH --gres=gpu:a100:2
-#SBATCH --nodes=4
-#SBATCH --output=logs_eval/%j.out
+#SBATCH --nodes=2
+#SBATCH --output=logs_eval_gsm8k/%x_%j.out
 
 
 ml Miniconda3
@@ -13,15 +13,15 @@ ml WebProxy
 ml CUDA/12.9.0  # Load CUDA module
 source activate /scratch/user/vishnukunde/.conda/envs/d1
 
-export WANDB_API_KEY=44aea80efa96b75369b009744f019926c33043f1
 export CUDA_HOME=${CUDA_HOME:-/usr/local/cuda}  # Set CUDA_HOME if not already set
 
 
 MASTER_PORT=29411
 
 # Arrays of tasks and generation lengths
-TASKS=("math")
-GEN_LENGTHS=(256)
+TASKS=("gsm8k")
+GEN_LENGTHS=(256 512 128)
+# DIFFUSION_STEPS=(128)
 
 # Multi-node settings derived from SLURM
 echo "SLURM_NNODES: $SLURM_NNODES"
@@ -37,8 +37,19 @@ echo "SLURM multi-node: nnodes=$NNODES master_addr=$MASTER_ADDR master_port=$MAS
 NUM_GPUS=${SLURM_GPUS_ON_NODE:-2}
 echo "Using $NUM_GPUS GPUs per node"
 
-CHECKPOINT_ID="3000"
-OUTPUT_DIR="eval_d1_${CHECKPOINT_ID}"
+
+# CHECKPOINT_DIR="curr_value_normalized_stepwise_unbiased_grpo_high_entropy_sudoku_eps_0.5_temp_0.9_ng8_bs6_ga2_le8_lr3e-5_gamma0.95_exact_kl1e-3"
+# CHECKPOINT_ID="5800"
+
+CHECKPOINT_DIR="unbiased_grpo_high_entropy_gsm8k_eps_0.5_temp_0.9_ng8_bs6_ga2_le8_lr3e-5_gamma0.0_kl0.04"
+CHECKPOINT_ID="6200"
+# TEMPERATURE=0.0
+
+# CHECKPOINT_ID="7000"
+# OUTPUT_DIR="init_value_normalized_stepwise_unbiased_grpo_high_entropy_sudoku_eps_0.5_temp_0.9_ng8_bs6_ga2_le8_lr3e-5_gamma0.93-${CHECKPOINT_ID}"
+
+OUTPUT_DIR="gsm8k/${CHECKPOINT_DIR}-${CHECKPOINT_ID}"
+# OUTPUT_DIR="countdown/ones_curr_value_normalized_stepwise_unbiased_grpo_high_entropy_countdown_eps_0.5_temp_0.9_ng8_bs6_ga2_le8_lr3e-5_gamma0.93__eos_kl0.04-${CHECKPOINT_ID}"
 
 for task in "${TASKS[@]}"; do
   for gen_length in "${GEN_LENGTHS[@]}"; do
@@ -48,10 +59,9 @@ for task in "${TASKS[@]}"; do
     else
       batch_size=8
     fi
-    
-    echo "Running evaluation on $task with gen_length=$gen_length, batch_size=$batch_size across $NNODES nodes"
-
-    srun --ntasks=$NNODES --ntasks-per-node=1 --kill-on-bad-exit=1 \
+    diffusion_steps=$((gen_length / 2))
+    echo "Running evaluation on $task with gen_length=$gen_length, batch_size=$batch_size, diffusion_steps=$diffusion_steps across $NNODES nodes"
+    srun --ntasks=$NNODES --ntasks-per-node=2 --kill-on-bad-exit=1 \
       bash -lc "torchrun \
         --nnodes $NNODES \
         --nproc_per_node $NUM_GPUS \
@@ -62,9 +72,10 @@ for task in "${TASKS[@]}"; do
         --dataset $task \
         --batch_size $batch_size \
         --gen_length $gen_length \
+        --diffusion_steps $diffusion_steps \
         --output_dir $OUTPUT_DIR \
         --model_path GSAI-ML/LLaDA-8B-Instruct \
-        --checkpoint_path ../diffu-grpo/checkpoints/math_base_bs12/checkpoint-${CHECKPOINT_ID}
+        --checkpoint_path ../traj-grpo/checkpoints/${CHECKPOINT_DIR}/checkpoint-${CHECKPOINT_ID}
       "
     done
 done

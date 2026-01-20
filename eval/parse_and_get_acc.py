@@ -360,10 +360,19 @@ def extract_setup_name(filename):
     return None
 
 
-def aggregate_results(directory="."):
+def aggregate_results(directory=".", diffusion_steps=None, gen_length=None):
     """Aggregate results from all JSON files and save detailed results."""
     # Find all JSON files matching the pattern
-    json_files = glob.glob(os.path.join(directory, "*_generations.json"))
+    if diffusion_steps and gen_length is not None:
+        diffusion_args = f"{gen_length}_{diffusion_steps}"
+    else:
+        diffusion_args = None
+    print(f"Diffusion args: {diffusion_args}")
+    if diffusion_args:
+        json_files = glob.glob(os.path.join(directory, f"*{diffusion_args}*_generations.json"))
+    else:
+        json_files = glob.glob(os.path.join(directory, "*_generations.json"))
+    print(f"JSON files: {json_files}")
 
     # Dictionary to store aggregated results by setup
     setups = defaultdict(
@@ -373,6 +382,7 @@ def aggregate_results(directory="."):
             "accuracy": 0.0,
             "questions": [],
             "total_effective_tokens": 0,
+            "diffusion_args": diffusion_args,
         }
     )
 
@@ -438,4 +448,9 @@ def aggregate_results(directory="."):
 
 
 if __name__ == "__main__":
-    aggregate_results(directory="eval_d1_3000")
+
+
+    gen_lengths = [512, 128]
+    for gen_length in gen_lengths:
+        diffusion_steps = gen_length // 2
+        aggregate_results(directory="countdown/reward_diff_unbiased_grpo_high_entropy_countdown_eps_0.5_temp_0.9_ng8_bs6_ga2_le8_lr3e-5_tau1.0_net_return_kl0.04-2400", diffusion_steps=diffusion_steps, gen_length=gen_length)
