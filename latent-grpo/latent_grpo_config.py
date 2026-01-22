@@ -451,5 +451,5 @@ class LatentGRPOConfig(TrainingArguments):
     )
     correctness_step_reward_only: bool = field(
         default=False,
-        metadata={"help": "Whether to use correctness reward only for the intermediate steps or use all reward functions."},
+        metadata={"help": "Whether to use correctness reward only for the intermediate steps or use all reward functions for all steps."},
     )
