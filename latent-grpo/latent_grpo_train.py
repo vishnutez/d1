@@ -83,8 +83,8 @@ def main(grpo_config, model_config):
     elif grpo_config.dataset == "math":
         dataset = get_math_questions("train")
         reward_functions = [
-            correctness_reward_func_math,
             boxed_and_answer_tags_format_reward,
+            correctness_reward_func_math,
         ]
         test_set = get_math_questions("test")
 

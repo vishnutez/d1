@@ -915,7 +915,16 @@ class LatentGRPOTrainer(GRPOTrainer):
         print(f'final_rewards_per_func_all_devices (batch_size, num_reward_funcs) = ({final_rewards_per_func_all_devices})', flush=True)
 
 
-        rewards_per_step = (rewards_per_func * self.reward_weights.to(device).unsqueeze(0).unsqueeze(0)).nansum(dim=2)
+        if args.correctness_step_reward_only:
+            custom_reward_weights = torch.zeros((self.args.diffusion_steps + 1, len(self.reward_funcs)))
+            custom_reward_weights[:, -1] = 1.0 # For all steps, we use correctness reward only
+            custom_reward_weights[-1, :] = 1.0 # For last step, we use all reward functions
+            custom_reward_weights = custom_reward_weights.to(device).unsqueeze(0) # (1, diffusion_steps+1, num_reward_funcs)
+        else:
+            custom_reward_weights = self.reward_weights.to(device).unsqueeze(0).unsqueeze(0)  # (1, 1, num_reward_funcs)
+            
+
+        rewards_per_step = (rewards_per_func * custom_reward_weights).nansum(dim=2)
         
         print(f'rewards_per_step (per_device_train_batch_size, diffusion_steps+1) = ({rewards_per_step.shape})', flush=True)
         

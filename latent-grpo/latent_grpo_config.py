@@ -449,3 +449,7 @@ class LatentGRPOConfig(TrainingArguments):
         default="net_return",
         metadata={"help": "Mode for the returns. Must be one of 'net_return' (net return; F), 'sequence_return' (sequence return; V)."},
     )
+    correctness_step_reward_only: bool = field(
+        default=False,
+        metadata={"help": "Whether to use correctness reward only for the intermediate steps or use all reward functions."},
+    )
