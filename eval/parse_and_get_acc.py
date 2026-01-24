@@ -450,7 +450,7 @@ def aggregate_results(directory=".", diffusion_steps=None, gen_length=None):
 if __name__ == "__main__":
 
 
-    gen_lengths = [512, 128]
+    gen_lengths = [256]
     for gen_length in gen_lengths:
         diffusion_steps = gen_length // 2
-        aggregate_results(directory="countdown/reward_diff_unbiased_grpo_high_entropy_countdown_eps_0.5_temp_0.9_ng8_bs6_ga2_le8_lr3e-5_tau1.0_net_return_kl0.04-2400", diffusion_steps=diffusion_steps, gen_length=gen_length)
+        aggregate_results(directory="gsm8k/unbiased_grpo_high_entropy_gsm8k_eps_0.5_temp_0.9_ng8_bs6_ga2_le8_lr3e-5_gamma0.0_kl0.04-6200", diffusion_steps=diffusion_steps, gen_length=gen_length)
