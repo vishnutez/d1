@@ -112,7 +112,7 @@ class LatentGRPOTrainer(GRPOTrainer):
             exact_kl = ((torch.exp(all_tokens_logps) * (all_tokens_logps - ref_all_tokens_logps)).sum(dim=-1)).sum(dim=-1) # (bs,)
             k3_estimate_kl = (
                 torch.exp(ref_per_token_logps - per_token_logps) - (ref_per_token_logps - per_token_logps) - 1
-            ) # (bs,)
+            ) # (bs,) using prod distribution over unmasked tokens in that step
         
         else:
             print(f'beta = 0.0, so no kl term is computed', flush=True)
@@ -144,7 +144,8 @@ class LatentGRPOTrainer(GRPOTrainer):
 
         num_tokens_per_diffusion_step = self.args.max_completion_length // self.args.diffusion_steps
             
-        loss = per_token_loss.mean() / num_tokens_per_diffusion_step # scalar
+        # Divided by num_tokens_per_diffusion_step due to prod distribution over unmasked tokens in that step to get the loss per token
+        loss = per_token_loss.mean() / num_tokens_per_diffusion_step
         print('step: ', self._step, 'loss: ', loss, flush=True)
 
         # Log the metrics
