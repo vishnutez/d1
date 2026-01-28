@@ -8,7 +8,7 @@ from trl import TrlParser, ModelConfig
 from peft import LoraConfig
 
 # Custom imports
-from latent_grpo_trainer_multiclip import LatentGRPOTrainer
+from latent_grpo_trainer_uniclip import LatentGRPOTrainer
 from latent_grpo_config import LatentGRPOConfig
 from reward_func import (
     xmlcount_reward_func,

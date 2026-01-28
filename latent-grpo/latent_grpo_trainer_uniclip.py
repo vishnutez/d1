@@ -141,8 +141,10 @@ class LatentGRPOTrainer(GRPOTrainer):
                 raise ValueError(f'Invalid max_entropy_regularization: {self.args.max_entropy_regularization}')
         else:
             print(f'alpha = 0.0, so no entropy regularization term is computed', flush=True)
+
+        num_tokens_per_diffusion_step = self.args.max_completion_length // self.args.diffusion_steps
             
-        loss = per_token_loss.mean() # scalar
+        loss = per_token_loss.mean() / num_tokens_per_diffusion_step # scalar
         print('step: ', self._step, 'loss: ', loss, flush=True)
 
         # Log the metrics
@@ -150,10 +152,10 @@ class LatentGRPOTrainer(GRPOTrainer):
 
         if self.beta != 0.0:
             if self.args.use_exact_kl:
-                mean_kl = exact_kl.mean()
+                mean_kl = exact_kl.mean() / num_tokens_per_diffusion_step
             else:
                 mean_kl = k3_estimate_kl.mean()
-            self._metrics[mode]["exact_kl"].append(self.accelerator.gather_for_metrics(exact_kl.mean()).mean().item())
+            self._metrics[mode]["exact_kl"].append(self.accelerator.gather_for_metrics(exact_kl.mean() / num_tokens_per_diffusion_step).mean().item())
             self._metrics[mode]["k3_estimate_kl"].append(self.accelerator.gather_for_metrics(k3_estimate_kl.mean()).mean().item())
             self._metrics[mode]["kl"].append(self.accelerator.gather_for_metrics(mean_kl).mean().item())
         else:
@@ -942,7 +944,7 @@ class LatentGRPOTrainer(GRPOTrainer):
 
         if self.args.returns_mode == 'net_return':
             print('using group advantages, returns_local = group_returns_local and incremental advantages added later', flush=True)
-            returns_local_selected = final_rewards.unsqueeze(1) + self.args.lambda1 * incremental_advantages_selected # (per_device_train_batch_size, logps_eval_num_steps)
+            returns_local_selected = (final_rewards.unsqueeze(1) + self.args.lambda1 * incremental_advantages_selected) / (1 + self.args.lambda1) # (per_device_train_batch_size, logps_eval_num_steps)
         elif self.args.returns_mode == 'sequence_return':
             returns_local_selected = final_rewards.unsqueeze(1) # (per_device_train_batch_size, 1)
             print('using sequence returns, returns_local = final_rewards', flush=True)

@@ -22,7 +22,7 @@ DS_OFFLOAD_OPT="none"
 DS_OFFLOAD_PARAM="none"
 DS_ZERO3_INIT=false
 
-DATASET="countdown"
+DATASET="gsm8k"
 
 MODEL_PATH=GSAI-ML/LLaDA-8B-Instruct
 
@@ -39,9 +39,9 @@ BASELINE_MODE="curr"
 TERMINATE_AT_LAST_NON_EOS=False
 EOS_SCALE="ones"
 BETA=0.04
-LAMBDA1=1.0
-LAMBDA2=0.0  # Do not change 0.0 for no q-estimate!
-GAMMA=0.0  # Do not change 0.0 for no gamma!
+LAMBDA1=0.5
+LAMBDA2=0.0
+GAMMA=0.0
 ALPHA=0.0
 RETURNS_MODE="net_return"
 MAX_ENTROPY_REGULARIZATION="entropy"
@@ -60,24 +60,25 @@ else
     KL_TYPE="kl"
 fi
 
-if [ "$LAMBDA1" -gt 0.0 ]; then
-    ALGO_NAME="diff_advantage_lambda1${LAMBDA1}_${RETURNS_MODE}_"
+if (( $(echo "$LAMBDA1 > 0.0" | bc -l) )); then
+    ALGO_NAME="diff_advantage_lambda1_${LAMBDA1}_${RETURNS_MODE}_"
 else
     ALGO_NAME=""
 fi
 
-if [ "$LAMBDA2" -gt 0.0 ]; then
-    ALGO_NAME="${ALGO_NAME}q_estimate_lambda2${LAMBDA2}_baseline_${BASELINE_MODE}_gamma${GAMMA}${TERMINATE_AT_LAST_NON_EOS_FLAG}_"
+if (( $(echo "$LAMBDA2 > 0.0" | bc -l) )); then
+    ALGO_NAME="${ALGO_NAME}q_estimate_lambda2_${LAMBDA2}_baseline_${BASELINE_MODE}_gamma${GAMMA}${TERMINATE_AT_LAST_NON_EOS_FLAG}_"
 else
     ALGO_NAME="${ALGO_NAME}base_"
 fi
+
 if [ "$CORRECTNESS_STEP_REWARD_ONLY" = True ]; then
     STEP_REWARD_ONLY_FLAG="_correctness_step_reward_only"
 else
     STEP_REWARD_ONLY_FLAG=""
 fi
 
-RUN_NAME="${ALGO_NAME}${LOGPS_EVAL_MODE}_latent_grpo_${LOGPS_EVAL_TIME_STEPS_MODE}_${DATASET}_eps_${EPSILON}_temp_${TEMPERATURE}_ng${NUM_GENERATIONS}_bs${PER_DEVICE_TRAIN_BATCH_SIZE}_ga${GRAD_ACCUMULATION_STEPS}_le${LOGPS_EVAL_NUM_STEPS}_lr${LEARNING_RATE}_${KL_TYPE}${BETA}${STEP_REWARD_ONLY_FLAG}_uniclip"
+RUN_NAME="${ALGO_NAME}${LOGPS_EVAL_MODE}_latent_grpo_${LOGPS_EVAL_TIME_STEPS_MODE}_${DATASET}_eps_${EPSILON}_temp_${TEMPERATURE}_ng${NUM_GENERATIONS}_bs${PER_DEVICE_TRAIN_BATCH_SIZE}_ga${GRAD_ACCUMULATION_STEPS}_le${LOGPS_EVAL_NUM_STEPS}_lr${LEARNING_RATE}_${KL_TYPE}${BETA}${STEP_REWARD_ONLY_FLAG}_uniclip_normalized"
 
 # latent_grpo_train.py args (editable)
 TRAIN_SCRIPT="latent_grpo_train.py"
@@ -108,7 +109,7 @@ TRAIN_ARGS_EXTRA="--model_path ${MODEL_PATH} \
                   --gamma=${GAMMA} \
                   --returns_mode ${RETURNS_MODE} \
                   --correctness_step_reward_only ${CORRECTNESS_STEP_REWARD_ONLY}"
-                     
+                  
 
 # ----------------------------
 # Environment setup
@@ -117,13 +118,12 @@ TRAIN_ARGS_EXTRA="--model_path ${MODEL_PATH} \
 ml Miniconda3
 ml WebProxy
 ml CUDA/12.9.0  # Load CUDA module
-source activate <YOUR_CONDA_ENV_NAME\>
+source activate <YOUR_CONDA_ENV_NAME \>
 
 export WANDB_API_KEY=<YOUR_WANDB_API_KEY>
 export WANDB_PROJECT=<YOUR_WANDB_PROJECT>
 export CUDA_HOME=${CUDA_HOME:-/usr/local/cuda}  # Set CUDA_HOME if not already set
 export HF_HOME=<YOUR_HF_HOME_DIR>  # remove this line if you are using the default HF_HOME
-
 
 
 mkdir -p logs "$CFGDIR"

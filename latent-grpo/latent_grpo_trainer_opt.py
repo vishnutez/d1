@@ -965,7 +965,7 @@ class LatentGRPOTrainer(GRPOTrainer):
 
         if self.args.returns_mode == 'net_return':
             print('using group advantages, returns_local = group_returns_local and incremental advantages added later', flush=True)
-            returns_local_selected = final_rewards.unsqueeze(1) + self.args.lambda1 * incremental_advantages # (per_device_train_batch_size, logps_eval_num_steps)
+            returns_local_selected =  (final_rewards.unsqueeze(1) + self.args.lambda1 * incremental_advantages) / (1 + self.args.lambda1) # (per_device_train_batch_size, logps_eval_num_steps)
         elif self.args.returns_mode == 'sequence_return':
             returns_local_selected = final_rewards.unsqueeze(1) # (per_device_train_batch_size, 1)
             print('using sequence returns, returns_local = final_rewards', flush=True)
