@@ -846,10 +846,9 @@ class LatentGRPOTrainer(GRPOTrainer):
         len_completion_ids = completion_ids.size(-1)
         selected_completion_ids = torch.zeros((batch_size, self.args.logps_eval_num_steps + 1, len_completion_ids), device=device, dtype=torch.long)
 
-        idx = 0
-        for b, eval_time_step in enumerate(eval_time_steps):
-            selected_completion_ids[b, idx] = completion_ids[b, eval_time_step]
-            idx += 1
+        for b in range(batch_size):
+            for t in range(self.args.logps_eval_num_steps):
+                selected_completion_ids[b, t] = completion_ids[b, eval_time_steps[b, t]]
 
         selected_completion_ids[:, -1] = completion_ids[:, -1] # last step is the final completion id
 
